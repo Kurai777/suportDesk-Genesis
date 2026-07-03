@@ -9,8 +9,8 @@ Rode só a integração:  pytest -m integration
 
 import psycopg
 import pytest
-from pgvector import Vector
 from pgvector.psycopg import register_vector_async
+from pgvector.utils import Vector
 
 from app.rag import RagRepository
 

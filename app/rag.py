@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import psycopg
 import voyageai
-from pgvector import Vector
+from pgvector.utils import Vector
 from psycopg.rows import dict_row
 from tenacity import (
     retry,
