@@ -1,0 +1,18 @@
+# Configuração de ferramentas (ruff, pytest). As dependências ficam em
+# requirements.txt / requirements-dev.txt, não aqui — o projeto é um serviço,
+# não um pacote publicável.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/F = pyflakes+pycodestyle, I = isort, UP = pyupgrade, B = bugbear, SIM = simplify.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: exige o Postgres do docker-compose de pé (pulado se ausente)",
+]

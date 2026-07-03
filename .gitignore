@@ -1,0 +1,21 @@
+# Segredos
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Ferramentas
+.pytest_cache/
+.ruff_cache/
+
+# Checkpoint da ingestão (estado local, resumível)
+ingest_state.txt
+
+# IDE / SO
+.vscode/
+.idea/
+.DS_Store

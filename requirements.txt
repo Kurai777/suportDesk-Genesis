@@ -1,0 +1,23 @@
+# Dependências do serviço — versões fixadas (baseline conhecido).
+# Somente as bibliotecas dos "Padrões de Engenharia" do CLAUDE.md.
+# Qualquer outra dependência exige aprovação antes de entrar aqui.
+
+# --- Web / API ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# --- Configuração e validação ---
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# --- Clientes HTTP e retry ---
+httpx==0.28.1
+tenacity==9.0.0
+
+# --- Claude e embeddings ---
+anthropic==0.42.0
+voyageai==0.3.2
+
+# --- Banco vetorial (Postgres + pgvector) ---
+psycopg[binary]==3.2.3
+pgvector==0.3.6

@@ -1,0 +1,29 @@
+# Postgres + pgvector para DESENVOLVIMENTO LOCAL.
+# Railway fica para produção; aqui a app roda localmente via `uvicorn` e aponta
+# a DATABASE_URL para este banco (ver .env.example).
+#
+#   docker compose up -d db     # sobe o banco
+#   docker compose down         # para (mantém o volume)
+#   docker compose down -v      # para e apaga os dados (re-roda o init.sql)
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: suporte-totvs-db
+    environment:
+      POSTGRES_USER: totvs
+      POSTGRES_PASSWORD: totvs
+      POSTGRES_DB: suporte_totvs
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U totvs -d suporte_totvs"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

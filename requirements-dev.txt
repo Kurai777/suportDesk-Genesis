@@ -1,0 +1,9 @@
+# Dependências de desenvolvimento/teste (não vão para a imagem de produção).
+# Instale com:  pip install -r requirements.txt -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest==8.3.4
+pytest-asyncio==0.25.0
+respx==0.22.0
+ruff==0.8.4
