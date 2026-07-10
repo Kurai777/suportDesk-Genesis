@@ -742,3 +742,29 @@ Um módulo só é considerado PRONTO quando:
 - **Testes (zero rede/paga):** web dispara → `query_web` exposto com a restrição `site:` e os
   `pares_web` rotulados `web_totvs`; web dispara mas volta vazia → `query_web` ainda aparece, decisão
   mantém ESCALAR; web desligada → `query_web=""` e buscador nunca chamado. **171 passando, ruff limpo.**
+
+## ADR-028 — Ferramenta de teste de envio REAL de WhatsApp (Evolution API)
+
+- **Contexto:** antes de produção, é preciso validar o envio real via Evolution API com um número
+  dedicado — o `WHATSAPP_DRY_RUN=true` (padrão seguro) nunca tocou a Evolution de verdade. Faltava
+  uma forma controlada de disparar um envio real e ver a resposta da API.
+- **Decisão — script manual + checklist, sem mexer no deploy:** `scripts/testa_whatsapp.py` usa o
+  `WhatsAppClient` de PRODUÇÃO (não reimplementa o envio) para mandar uma mensagem real ao número
+  passado na linha de comando. `TESTE_WHATSAPP.md` documenta o passo a passo do lado do operador
+  (subir Evolution, criar instância, conectar o número por QR, preencher o `.env`).
+- **Visibilidade da resposta da API:** o `enviar()` de produção é best-effort e esconde a resposta
+  (retorna só bool). O script INJETA um `httpx.AsyncClient` com hook de resposta que CAPTURA status +
+  corpo da Evolution — respeitando o padrão de cliente-por-injeção, sem alterar o `WhatsAppClient`.
+  Assim o operador vê `HTTP 201 + corpo` no sucesso, ou o corpo do erro (ex.: "instance not
+  connected") na falha, ou "sem resposta" em falha de rede.
+- **Proteções (não disparar sem querer):** se `WHATSAPP_DRY_RUN` não for `false`, o script NÃO envia —
+  avisa e sai (código 1). Se faltar `WHATSAPP_API_URL`/`WHATSAPP_INSTANCE`/`WHATSAPP_API_KEY`, diz
+  QUAL falta antes de tentar. O cabeçalho do script deixa explícito que ENVIA MENSAGEM REAL.
+- **Reverter para dry-run é seguro e imediato:** o `WhatsAppClient` relê `whatsapp_dry_run` a CADA
+  `enviar()` (não fixa na subida — ver `whatsapp.py`), então voltar `WHATSAPP_DRY_RUN=true` faz toda
+  notificação virar só log, sem tocar a Evolution. Documentado no checklist.
+- **Escopo:** só o script de teste e o checklist. Deploy/produção (migração p/ Meta Cloud API) NÃO
+  tocados.
+- **Testes (respx, zero envio real/pago):** config incompleta é detectada e nomeada; sucesso captura
+  a resposta da Evolution; falha HTTP mostra o corpo do erro; falha de rede reporta "sem resposta"; o
+  número é normalizado (DDI 55) no corpo enviado. **177 passando, ruff limpo.**
