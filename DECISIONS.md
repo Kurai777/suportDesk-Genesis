@@ -635,3 +635,32 @@ Um módulo só é considerado PRONTO quando:
   NÃO casa assunto em CAIXA ALTA sem código; reformulação reinjeta código descartado sem duplicar;
   degenerada/curta cai no original; pipeline busca as duas e responde com o problema; flag off/falha
   colapsa a união. **167 passando, ruff limpo.**
+
+## ADR-025 — Anexar print de erro na interface de teste `/teste`
+
+- **Contexto:** o backend de leitura de imagens (ADR-023) já estava PRONTO e testado — download
+  do anexo (`freshdesk.baixar_anexo`), transcrição (`VisaoClient`), concatenação best-effort no
+  webhook (`pipeline._incorporar_imagens`, teto `_MAX_IMAGENS=4`). Mas o `_incorporar_imagens` mora
+  só no `processar` (webhook); o miolo `inspecionar`, que a interface `/teste` usa, nunca leu
+  imagens (ADR-019: sem Freshdesk). Faltava só o que permite TESTAR um print na tela.
+- **Decisão — upload direto na interface, reusando o VisaoClient:** `/teste` ganha um input de
+  arquivo (múltiplo). O front lê cada imagem como base64 (tira o prefixo `data:...;base64,`) e envia
+  em `TesteRequest.imagens` (novo modelo `ImagemTeste` = `content_type` + `dados_base64`). O
+  `main._transcrever_enviadas` decodifica e transcreve pelo MESMO `VisaoClient` do webhook, e o
+  resultado é concatenado ao texto colado ANTES da inspeção — logo entra na busca E na reformulação
+  de query da ADR-024 (é o texto que vira a query).
+- **DRY — helper puro compartilhado:** a concatenação sob o cabeçalho `[Texto extraído de imagens…]`
+  virou `pipeline.concatenar_transcricoes(texto, trechos)` (função pura), reusada pelo webhook
+  (`_incorporar_imagens`) e pela interface. A única diferença entre os dois caminhos é a ORIGEM dos
+  bytes: download do Freshdesk (webhook) × base64 da tela (interface).
+- **Fidelidade e best-effort:** `_transcrever_enviadas` espelha o webhook — respeita
+  `LEITURA_IMAGENS_ATIVA` e o teto `_MAX_IMAGENS`, e é best-effort: base64 inválido ou falha na
+  transcrição de uma imagem é ignorado (log), sem derrubar a inspeção. Sem `VisaoClient` no estado
+  ou flag off → nenhuma transcrição, texto inalterado. Assim o que a tela mostra é o que o pipeline
+  faria.
+- **Escopo:** NÃO reimplementa o backend da ADR-023 (que já estava pronto) — só liga a interface a
+  ele. O caminho de PRODUÇÃO (webhook) segue idêntico.
+- **Testes (visão mockada, zero rede):** imagem com texto → transcrita e concatenada (código
+  preservado para a busca); ilegível (`""`) → não concatena, segue sem ela; sem anexo → visão nem é
+  chamada, texto inalterado; base64 inválido / falha na transcrição → ignorado best-effort; flag off
+  / sem VisaoClient → não transcreve; respeita o teto `_MAX_IMAGENS`. **170 passando, ruff limpo.**

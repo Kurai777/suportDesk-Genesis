@@ -5,6 +5,7 @@ Garantem que o caminho de teste NUNCA toca o Freshdesk nem envia WhatsApp: `insp
 chamada real. O helper roda contra o banco de TESTE (vazio → recuperação retorna []).
 """
 
+import base64
 from types import SimpleNamespace
 
 import psycopg
@@ -17,9 +18,10 @@ from app.main import (
     _para_resposta,
     _teste_ativo,
     _ticket_de_teste,
+    _transcrever_enviadas,
 )
-from app.models import EMPRESA_DESCONHECIDA, RespostaIA
-from app.pipeline import Decisao
+from app.models import EMPRESA_DESCONHECIDA, ImagemTeste, RespostaIA
+from app.pipeline import _MAX_IMAGENS, Decisao, concatenar_transcricoes
 
 
 @pytest.fixture
@@ -121,3 +123,98 @@ async def test_inspecao_do_texto_nao_usa_freshdesk_nem_whatsapp(settings, banco_
     assert resp.decisao == "escalar"
     assert resp.pedido_operacional is False  # exposto na tela (ADR-020)
     assert resp.pares == []  # banco de teste vazio
+
+
+# --- prints anexados na interface (ADR-025) --------------------------------
+# `_transcrever_enviadas` reusa o MESMO VisaoClient do webhook; a concatenação usa o helper
+# puro `concatenar_transcricoes`. Best-effort: base64 inválido / falha na imagem é ignorado.
+
+
+class FakeVisaoTransc:
+    def __init__(self, texto="", erro=None):
+        self._texto = texto
+        self._erro = erro
+        self.chamadas = 0
+
+    async def transcrever(self, dados, content_type):
+        self.chamadas += 1
+        if self._erro is not None:
+            raise self._erro
+        return self._texto
+
+
+def _app(settings, visao):
+    return SimpleNamespace(state=SimpleNamespace(settings=settings, visao=visao))
+
+
+def _png(dados=b"\x89PNG\r\n\x1a\nfake"):
+    return ImagemTeste(content_type="image/png", dados_base64=base64.b64encode(dados).decode())
+
+
+async def test_imagem_com_texto_e_transcrita_e_concatenada(settings):
+    visao = FakeVisaoTransc(texto="SCC19070\nMV_ATFMOED sem taxa da moeda 3")
+    trechos = await _transcrever_enviadas(_app(settings, visao), [_png()])
+
+    assert visao.chamadas == 1
+    assert trechos == ["SCC19070\nMV_ATFMOED sem taxa da moeda 3"]
+    # concatenado ao texto colado -> vira parte da query da busca
+    combinado = concatenar_transcricoes("Cliente relata erro na NF", trechos)
+    assert "Cliente relata erro na NF" in combinado
+    assert "SCC19070" in combinado and "MV_ATFMOED" in combinado
+
+
+async def test_imagem_ilegivel_nao_concatena_e_segue_sem_ela(settings):
+    visao = FakeVisaoTransc(texto="")  # regra de ouro: ilegível -> ""
+    trechos = await _transcrever_enviadas(_app(settings, visao), [_png()])
+
+    assert visao.chamadas == 1  # tentou transcrever
+    assert trechos == []
+    assert concatenar_transcricoes("texto do chamado", trechos) == "texto do chamado"
+
+
+async def test_sem_imagem_fluxo_inalterado(settings):
+    visao = FakeVisaoTransc(texto="não deveria ser usado")
+    trechos = await _transcrever_enviadas(_app(settings, visao), [])
+
+    assert visao.chamadas == 0  # sem anexo, não chama o modelo
+    assert trechos == []
+    assert concatenar_transcricoes("texto", trechos) == "texto"
+
+
+async def test_base64_invalido_e_ignorado_best_effort(settings):
+    visao = FakeVisaoTransc(texto="x")
+    ruim = ImagemTeste(content_type="image/png", dados_base64="não é base64 @@@")
+    trechos = await _transcrever_enviadas(_app(settings, visao), [ruim])
+
+    assert trechos == []
+    assert visao.chamadas == 0  # nem chegou a transcrever
+
+
+async def test_falha_na_transcricao_e_ignorada_best_effort(settings):
+    visao = FakeVisaoTransc(erro=RuntimeError("api de visão caiu"))
+    trechos = await _transcrever_enviadas(_app(settings, visao), [_png()])
+
+    assert trechos == []  # falha não derruba a inspeção
+
+
+async def test_flag_desligada_nao_transcreve(settings):
+    off = settings.model_copy(update={"leitura_imagens_ativa": False})
+    visao = FakeVisaoTransc(texto="ignorado")
+    trechos = await _transcrever_enviadas(_app(off, visao), [_png()])
+
+    assert trechos == []
+    assert visao.chamadas == 0
+
+
+async def test_sem_visaoclient_nao_quebra(settings):
+    trechos = await _transcrever_enviadas(_app(settings, None), [_png()])
+    assert trechos == []
+
+
+async def test_respeita_teto_de_imagens(settings):
+    visao = FakeVisaoTransc(texto="t")
+    enviadas = [_png(dados=bytes([i])) for i in range(_MAX_IMAGENS + 3)]
+    trechos = await _transcrever_enviadas(_app(settings, visao), enviadas)
+
+    assert visao.chamadas == _MAX_IMAGENS  # transcreveu só até o teto
+    assert len(trechos) == _MAX_IMAGENS

@@ -112,8 +112,23 @@ class ResultadoChamado(BaseModel):
 # --- Entrada: webhook ------------------------------------------------------
 
 
+class ImagemTeste(BaseModel):
+    """Print de erro anexado na interface de teste, em base64 (ADR-025).
+
+    Enviado direto pela tela (não vem do Freshdesk); é transcrito pelo VisaoClient e
+    concatenado ao texto antes da busca, exatamente como um anexo real do chamado.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    content_type: str = Field(..., description="MIME da imagem, ex.: image/png.")
+    dados_base64: str = Field(
+        ..., description="Conteúdo da imagem em base64 (sem o prefixo 'data:...;base64,')."
+    )
+
+
 class TesteRequest(BaseModel):
-    """Entrada da interface de teste (ADR-019): texto colado + empresa opcional.
+    """Entrada da interface de teste (ADR-019): texto colado + empresa + prints opcionais.
 
     Como o texto vem colado (não do Freshdesk), a `empresa` é informada à mão para
     permitir auditar isolamento de dados por empresa na tela.
@@ -123,6 +138,9 @@ class TesteRequest(BaseModel):
 
     texto: str = Field(..., description="Texto do chamado a inspecionar.")
     empresa: str | None = Field(None, description="Empresa do chamado (opcional).")
+    imagens: list[ImagemTeste] = Field(
+        default_factory=list, description="Prints de erro anexados (opcional, ADR-025)."
+    )
 
 
 class ParInspecao(BaseModel):

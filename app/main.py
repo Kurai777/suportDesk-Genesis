@@ -9,6 +9,8 @@ criados no startup e reaproveitados; a conexão com o Postgres é aberta por tar
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hmac
 import logging
 import sys
@@ -31,6 +33,7 @@ from app.config import Settings, get_settings
 from app.freshdesk import FreshdeskClient
 from app.models import (
     EMPRESA_DESCONHECIDA,
+    ImagemTeste,
     ParInspecao,
     Requester,
     TesteRequest,
@@ -38,7 +41,14 @@ from app.models import (
     TicketFreshdesk,
     WebhookFreshdesk,
 )
-from app.pipeline import IdempotenciaRepository, Inspecao, inspecionar, processar
+from app.pipeline import (
+    _MAX_IMAGENS,
+    IdempotenciaRepository,
+    Inspecao,
+    concatenar_transcricoes,
+    inspecionar,
+    processar,
+)
 from app.rag import RagRepository, RagService, Similar, VoyageClient
 from app.visao import VisaoClient
 from app.whatsapp import WhatsAppClient
@@ -194,6 +204,35 @@ async def _inspecao_do_texto(app: FastAPI, texto: str, empresa: str | None) -> I
         await conn.close()
 
 
+async def _transcrever_enviadas(app: FastAPI, imagens: list[ImagemTeste]) -> list[str]:
+    """Transcreve os prints enviados na interface (ADR-025), BEST-EFFORT.
+
+    Espelha o webhook (`_incorporar_imagens`): respeita `LEITURA_IMAGENS_ATIVA` e o teto
+    `_MAX_IMAGENS`, e reusa o MESMO VisaoClient. Base64 inválido ou falha na transcrição de
+    uma imagem é ignorado — não derruba a inspeção. Fonte diferente do webhook (bytes vêm da
+    tela, não de download do Freshdesk), então a decodificação mora aqui.
+    """
+    settings: Settings = app.state.settings
+    visao: VisaoClient | None = getattr(app.state, "visao", None)
+    if visao is None or not settings.leitura_imagens_ativa:
+        return []
+
+    trechos: list[str] = []
+    for img in imagens[:_MAX_IMAGENS]:
+        try:
+            dados = base64.b64decode(img.dados_base64, validate=True)
+            texto = await visao.transcrever(dados, img.content_type)
+        except (binascii.Error, ValueError):
+            logger.warning("Imagem enviada com base64 inválido — ignorada.")
+            continue
+        except Exception:
+            logger.exception("Falha ao transcrever imagem enviada — ignorada.")
+            continue
+        if texto.strip():
+            trechos.append(texto.strip())
+    return trechos
+
+
 @app.get("/teste", response_class=HTMLResponse)
 async def teste_pagina(request: Request) -> HTMLResponse:
     _teste_ativo(request)
@@ -204,5 +243,8 @@ async def teste_pagina(request: Request) -> HTMLResponse:
 async def teste_processar(payload: TesteRequest, request: Request) -> TesteResposta:
     _teste_ativo(request)
     empresa = (payload.empresa or "").strip() or EMPRESA_DESCONHECIDA
-    insp = await _inspecao_do_texto(request.app, payload.texto, payload.empresa)
+    # Prints anexados: transcritos e concatenados ANTES da busca, como no webhook (ADR-023/025).
+    trechos = await _transcrever_enviadas(request.app, payload.imagens)
+    texto = concatenar_transcricoes(payload.texto, trechos)
+    insp = await _inspecao_do_texto(request.app, texto, payload.empresa)
     return _para_resposta(insp, empresa)

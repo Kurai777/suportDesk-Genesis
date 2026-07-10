@@ -308,9 +308,21 @@ async def _incorporar_imagens(
 
     if not trechos:
         return ticket
-    bloco = "\n\n".join(trechos)
-    nova_descricao = f"{ticket.description_text}\n\n{_CABECALHO_IMAGENS}\n{bloco}".strip()
+    nova_descricao = concatenar_transcricoes(ticket.description_text, trechos)
     return ticket.model_copy(update={"description_text": nova_descricao})
+
+
+def concatenar_transcricoes(texto: str, trechos: list[str]) -> str:
+    """Concatena as transcrições de imagens ao texto, sob um cabeçalho (ADR-023/025).
+
+    Função PURA, reusada pelo webhook (`_incorporar_imagens`, a partir de anexos do Freshdesk)
+    e pela interface de teste (a partir de imagens enviadas na hora). Sem trechos, devolve o
+    texto inalterado. A transcrição entra ANTES da busca — vira parte da query do RAG.
+    """
+    if not trechos:
+        return texto
+    bloco = "\n\n".join(trechos)
+    return f"{texto}\n\n{_CABECALHO_IMAGENS}\n{bloco}".strip()
 
 
 # --- orquestração (webhook: miolo + I/O) -----------------------------------

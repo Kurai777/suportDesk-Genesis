@@ -41,6 +41,8 @@
   <textarea id="texto" placeholder="Cole o assunto + descrição do chamado..."></textarea>
   <label for="empresa">Empresa (opcional — texto colado não vem do Freshdesk)</label>
   <input type="text" id="empresa" placeholder="ex.: Cliente ACME"/>
+  <label for="imagens">Prints de erro (opcional — até 4 imagens, transcritas antes da busca)</label>
+  <input type="file" id="imagens" accept="image/png,image/jpeg,image/gif,image/webp" multiple/>
   <button id="btn" onclick="processar()">Processar</button>
 
   <div id="resultado"></div>
@@ -62,17 +64,34 @@ function tabelaPares(pares){
   return `<table><tr><th>Fonte / título</th><th>Distância</th><th>Trecho (problema)</th></tr>${linhas}</table>`;
 }
 
+function lerImagem(file){
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve({
+      content_type: file.type,
+      dados_base64: String(fr.result).split(',', 2)[1]  // tira o prefixo "data:...;base64,"
+    });
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+}
+
 async function processar(){
   const texto = document.getElementById('texto').value.trim();
   const empresa = document.getElementById('empresa').value;
+  const arquivos = Array.from(document.getElementById('imagens').files).slice(0, 4);
   const out = document.getElementById('resultado');
   const btn = document.getElementById('btn');
-  if(!texto){ out.innerHTML = '<p class="muted">Cole o texto do chamado primeiro.</p>'; return; }
-  btn.disabled = true; out.innerHTML = '<p class="muted">Processando (RAG + Claude)...</p>';
+  if(!texto && !arquivos.length){
+    out.innerHTML = '<p class="muted">Cole o texto do chamado ou anexe um print.</p>'; return;
+  }
+  btn.disabled = true;
+  out.innerHTML = '<p class="muted">Processando (transcrição + RAG + Claude)...</p>';
   try {
+    const imagens = await Promise.all(arquivos.map(lerImagem));
     const resp = await fetch('/teste/processar', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({texto, empresa})
+      body: JSON.stringify({texto, empresa, imagens})
     });
     if(!resp.ok){
       out.innerHTML = '<p style="color:#a11">Erro '+resp.status+': '+esc(await resp.text())+'</p>';
