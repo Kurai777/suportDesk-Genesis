@@ -18,6 +18,9 @@ venv/
 # e ingerido no pgvector por `python -m scripts.ingest_docs`.
 docs_totvs/
 
+# Snapshots do banco (pg_dump) — ~37 MB, contêm a base inteira. Ver INFRA.md.
+*.dump
+
 # Logs locais
 *.log
 

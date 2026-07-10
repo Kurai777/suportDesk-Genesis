@@ -582,3 +582,31 @@ Um módulo só é considerado PRONTO quando:
   ponta no `processar`); imagem ilegível → vazio, segue sem ela; falha no download → best-effort,
   ticket intacto; sem anexo / sem VisaoClient / flag off → fluxo inalterado; `baixar_anexo` vai à
   URL pré-assinada sem auth; VisaoClient normaliza tipo, ignora tipo não suportado/bytes vazios.
+
+## ADR-024 — Portabilidade da base de conhecimento (PROPOSTA — aguardando escolha)
+
+- **Problema:** a base é carregada à mão entre máquinas (desktop ↔ notebook), hoje copiando
+  `docs_totvs/` pelo Drive. Isso se repete a cada troca de máquina e não há backup nenhum.
+- **Diagnóstico — o objeto sincronizado está errado:** `docs_totvs/` (8.349 `.txt`, 42 MB) é um
+  **artefato intermediário descartável** (entrada do `ingest_docs`, regenerável pelo
+  `coletar_central`). A base de verdade é a tabela `conhecimento` (Postgres+pgvector), cujo valor
+  são os **embeddings já pagos** (8.325 vetores `voyage-3` 1024d). Levar os `.txt` obriga a
+  **re-embeddar tudo** no destino; levar o banco, não.
+- **Medido (2026-07-10):** 8.350 linhas (8.325 doc + 25 ticket); tabela+HNSW 121 MB; banco 128 MB;
+  **`pg_dump -Fc -Z9` = 37 MB** — *menor* que os `.txt` e já com os vetores. PG 16.14, pgvector 0.8.4.
+- **Opções (detalhadas em `INFRA.md`):**
+  - **A (recomendada) — Postgres gerenciado único** (Neon / Railway / Supabase; 128 MB cabe no free
+    tier). As duas máquinas só apontam `DATABASE_URL` no `.env`. **Acaba a transição**: sem Drive,
+    sem docker local, sem `docs_totvs/` no notebook. Restaurar o dump uma vez leva os embeddings.
+  - **B — snapshot `pg_dump` em bucket/Drive** (37 MB). Serve para uso offline **e como backup**
+    (hoje inexistente). É também o veículo de migração para a opção A.
+  - **C — `docs_totvs/` num bucket** (matéria-prima, opcional). Não é necessário para rodar o
+    serviço, que lê apenas o banco.
+- **Recomendação:** **A + B** (gerenciado compartilhado, com snapshot periódico de backup).
+- **Guardrails registrados:** `pytest` faz `DELETE FROM conhecimento` → `TEST_DATABASE_URL` JAMAIS
+  pode apontar para o banco da aplicação/gerenciado (default do conftest já é `..._test` local);
+  `DATABASE_URL` é segredo (só `.env`); `*.dump` e `docs_totvs/` no `.gitignore`; dev e prod NÃO
+  compartilham banco (o `ingest_docs` escreve na `conhecimento`); `VECTOR(1024)` amarra o modelo de
+  embedding — trocar de modelo exige recriar a coluna e re-embeddar.
+- **Status:** proposta. Falta o Bruno escolher o provedor (A) e criar a instância; a partir daí o
+  `.env` de cada máquina só troca a `DATABASE_URL`.
