@@ -14,10 +14,13 @@ from app.config import Settings
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# Os testes de integração usam este banco; sobrescreva com TEST_DATABASE_URL para
-# apontar para outra porta/host (ex.: quando a 5432 já está ocupada).
+# ⚠️ Os testes de integração fazem DELETE FROM conhecimento/chamado_processado.
+# Use SEMPRE um banco DEDICADO a testes (nunca o banco da aplicação), senão a base
+# ingerida (paga em embeddings Voyage) é apagada a cada rodada de pytest. Por isso o
+# default e o exemplo apontam para '..._test'. Sobrescreva com TEST_DATABASE_URL para
+# ajustar host/porta (ex.: quando a 5432 já está ocupada).
 _DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql://totvs:totvs@localhost:5432/suporte_totvs"
+    "TEST_DATABASE_URL", "postgresql://totvs:totvs@localhost:5432/suporte_totvs_test"
 )
 
 _SETTINGS_KWARGS = {

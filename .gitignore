@@ -12,8 +12,14 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
-# Checkpoint da ingestão (estado local, resumível)
-ingest_state.txt
+# Base de documentação coletada da TOTVS (~8,3k arquivos / 42 MB).
+# Conteúdo de TERCEIROS e derivado — não versionar. É reprodutível:
+#   python -m scripts.coletar_central --temas <tema>   (ver COLETA.md)
+# e ingerido no pgvector por `python -m scripts.ingest_docs`.
+docs_totvs/
+
+# Logs locais
+*.log
 
 # IDE / SO
 .vscode/

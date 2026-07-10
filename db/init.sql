@@ -18,8 +18,14 @@ CREATE TABLE IF NOT EXISTS conhecimento (
     problema   TEXT        NOT NULL,          -- relato do cliente (inclui logs, ex.: SCC19070)
     solucao    TEXT        NOT NULL,          -- resposta do agente que resolveu
     embedding  VECTOR(1024) NOT NULL,         -- Voyage voyage-3
+    fonte      TEXT        NOT NULL DEFAULT 'ticket',  -- 'ticket' | 'documentacao' (ADR-014)
+    titulo     TEXT,                          -- título do artigo/seção (para 'documentacao')
     criado_em  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Idempotente para bancos já existentes (criados antes da ADR-014):
+ALTER TABLE conhecimento ADD COLUMN IF NOT EXISTS fonte TEXT NOT NULL DEFAULT 'ticket';
+ALTER TABLE conhecimento ADD COLUMN IF NOT EXISTS titulo TEXT;
 
 -- Índice ANN para busca por similaridade de cosseno (embeddings Voyage).
 CREATE INDEX IF NOT EXISTS conhecimento_embedding_idx

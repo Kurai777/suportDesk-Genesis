@@ -1,21 +1,27 @@
-"""Testes do Módulo 4 — scripts/ingest_tickets.py.
+"""Testes do Módulo 4 — scripts/ingest_tickets.py (com limpeza + filtro, ADR-011).
 
-Freshdesk (tickets + conversations) é mockado com respx; Voyage e o repositório
-são fakes — nenhuma chamada real.
+Freshdesk (tickets + conversations) mockado com respx; Voyage e o repositório são
+fakes — nenhuma chamada real.
 """
 
 import httpx
+import pytest
 import respx
 
 from app.freshdesk import FreshdeskClient
+from app.texto import limpar_texto
 from scripts.ingest_tickets import (
-    carregar_processados,
+    _motivo_baixo_valor,
     extrair_solucao,
     ingerir,
-    marcar_processado,
 )
 
 BASE = "https://genesis.freshdesk.com/api/v2"
+
+# Solução válida (longa, com conteúdo técnico) usada no chamado ingerido.
+SOLUCAO_VALIDA = (
+    "Atualize a taxa da moeda 3 do Ativo Fixo (parâmetro MV_ATFMOED) e reprocesse a NF."
+)
 
 
 # --- heurística da solução (função pura) -----------------------------------
@@ -39,15 +45,45 @@ def test_extrair_solucao_sem_resposta_publica_retorna_none():
     assert extrair_solucao(conversas) is None
 
 
-# --- checkpoint resumível --------------------------------------------------
+# --- filtro de qualidade da solução (ADR-011) ------------------------------
 
 
-def test_checkpoint_carrega_e_marca(tmp_path):
-    caminho = tmp_path / "state.txt"
-    assert carregar_processados(caminho) == set()
-    marcar_processado(caminho, 1)
-    marcar_processado(caminho, 42)
-    assert carregar_processados(caminho) == {1, 42}
+@pytest.mark.parametrize(
+    "solucao,descartar",
+    [
+        ("Ajustado.", True),  # poucas palavras
+        ("ok", True),
+        ("Conforme solicitado, foi feita a correção", True),  # 6 palavras
+        ("Favor validar e dar um ok se estiver de acordo com o processo", True),  # pedido
+        ("Realizado o ajuste conforme combinado ontem com a equipe hoje", True),  # genérica curta
+        (SOLUCAO_VALIDA, False),  # solução técnica com descrição
+        (
+            "Após atualizar a taxa da moeda do dia a classificação do documento de "
+            "entrada foi normalizada corretamente no sistema",
+            False,  # prosa longa, técnica, sem código — DEVE passar
+        ),
+    ],
+)
+def test_motivo_baixo_valor(solucao, descartar):
+    assert (_motivo_baixo_valor(solucao) is not None) is descartar
+
+
+def test_filtro_mantem_solucao_tecnica_em_prosa_mv_atfmoed():
+    # Caso-chave: solução técnica REAL, em português, sem código de parâmetro.
+    bruta = (
+        "​Rafael, boa tarde, tudo bem? Após mapeamento, identificamos que a moeda a ser "
+        "considerada para cálculo do Ativo Fixo estava incorreta. Após atualizarmos a "
+        "taxa da moeda do dia, a classificação do documento de entrada foi normalizada. "
+        "Verifique o lançamento da nota e, se necessário, estorne e preencha os dados."
+    )
+    assert _motivo_baixo_valor(limpar_texto(bruta)) is None
+
+
+def test_filtro_descarta_encerramento_generico():
+    bruta = (
+        "Hi Aldenir Domingos, Bom dia, tudo bem? Conforme solicitado, foi feita a correção. Att,"
+    )
+    assert _motivo_baixo_valor(limpar_texto(bruta)) is not None
 
 
 # --- núcleo da ingestão ----------------------------------------------------
@@ -79,9 +115,10 @@ def _montar_rotas_freshdesk() -> dict:
         return_value=httpx.Response(
             200,
             json=[
-                {"id": 1, "status": 4},  # resolvido, com solução
+                {"id": 1, "status": 4},  # resolvido, solução com conteúdo -> ingere
                 {"id": 2, "status": 2},  # aberto -> ignorado
-                {"id": 3, "status": 5},  # fechado, sem solução pública
+                {"id": 3, "status": 5},  # fechado, sem solução pública -> sem_solucao
+                {"id": 4, "status": 4},  # resolvido, solução de baixo valor -> descarta
             ],
         )
     )
@@ -101,7 +138,7 @@ def _montar_rotas_freshdesk() -> dict:
             },
         )
     )
-    t3 = respx.get(f"{BASE}/tickets/3").mock(
+    respx.get(f"{BASE}/tickets/3").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -114,12 +151,25 @@ def _montar_rotas_freshdesk() -> dict:
             },
         )
     )
+    respx.get(f"{BASE}/tickets/4").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": 4,
+                "status": 4,
+                "priority": 2,
+                "description_text": "Erro ao gerar o relatório de comissões.",
+                "requester": {"name": "Cliente C"},
+                "company": {"name": "Empresa C"},
+            },
+        )
+    )
     respx.get(f"{BASE}/tickets/1/conversations").mock(
         return_value=httpx.Response(
             200,
             json=[
                 {"private": False, "incoming": True, "body_text": "cliente descreve"},
-                {"private": False, "incoming": False, "body_text": "Atualize a taxa da moeda 3."},
+                {"private": False, "incoming": False, "body_text": SOLUCAO_VALIDA},
             ],
         )
     )
@@ -129,45 +179,48 @@ def _montar_rotas_freshdesk() -> dict:
             json=[{"private": True, "incoming": False, "body_text": "só nota interna"}],
         )
     )
-    return {"t1": t1, "t3": t3}
+    respx.get(f"{BASE}/tickets/4/conversations").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"private": False, "incoming": False, "body_text": "Ajustado."}],
+        )
+    )
+    return {"t1": t1}
 
 
 @respx.mock
-async def test_ingerir_ingere_resolvidos_com_solucao(settings):
+async def test_ingerir_ingere_valido_descarta_baixo_valor_e_conta(settings):
     _montar_rotas_freshdesk()
     voyage = FakeVoyage()
     repo = FakeRepo()
-    processados: set[int] = set()
-    marcados: list[int] = []
 
     async with FreshdeskClient(settings) as fd:
-        resumo = await ingerir(fd, voyage, repo, processados, marcados.append)
+        resumo = await ingerir(fd, voyage, repo, set())  # base vazia = nada ingerido
 
-    assert resumo.ingeridos == 1
-    assert resumo.sem_solucao == 1  # ticket 3 sem resposta pública de agente
+    assert resumo.ingeridos == 1  # ticket 1
+    assert resumo.sem_solucao == 1  # ticket 3 (sem resposta pública)
+    assert resumo.descartados_filtro == 1  # ticket 4 ("Ajustado.")
     assert len(repo.inseridos) == 1
     inserido = repo.inseridos[0]
     assert inserido["ticket_id"] == 1
     assert inserido["empresa"] == "Empresa A"
-    assert inserido["solucao"] == "Atualize a taxa da moeda 3."
+    assert inserido["solucao"] == SOLUCAO_VALIDA
     assert "SCC19070" in inserido["problema"]
     assert len(inserido["embedding"]) == 1024
-    # Só os resolvidos são marcados (o aberto id=2 não entra no checkpoint).
-    assert set(marcados) == {1, 3}
 
 
 @respx.mock
-async def test_ingerir_pula_ja_processados_sem_refetch(settings):
+async def test_ingerir_pula_ja_ingeridos_sem_refetch(settings):
     rotas = _montar_rotas_freshdesk()
     voyage = FakeVoyage()
     repo = FakeRepo()
-    processados = {1}  # ticket 1 já foi ingerido antes
-    marcados: list[int] = []
 
     async with FreshdeskClient(settings) as fd:
-        resumo = await ingerir(fd, voyage, repo, processados, marcados.append)
+        # ticket 1 já está na base (idempotência pelo banco, ADR-016)
+        resumo = await ingerir(fd, voyage, repo, {1})
 
     assert resumo.ja_processados == 1
-    assert resumo.ingeridos == 0  # ticket 1 pulado; ticket 3 sem solução
-    assert not rotas["t1"].called  # resumível: não re-busca o já processado
+    assert resumo.ingeridos == 0  # ticket 1 pulado; 3 sem solução; 4 baixo valor
+    assert resumo.descartados_filtro == 1
+    assert not rotas["t1"].called  # idempotente: não re-busca o já ingerido
     assert repo.inseridos == []

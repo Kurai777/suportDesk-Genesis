@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Painel de teste — Suporte TOTVS IA</title>
+<style>
+  body { font-family: system-ui, Arial, sans-serif; max-width: 900px; margin: 1.5rem auto;
+         padding: 0 1rem; color: #1a1a1a; }
+  .aviso { background: #fff3cd; border: 1px solid #ffe08a; padding: .6rem .8rem;
+           border-radius: 6px; margin-bottom: 1rem; }
+  textarea { width: 100%; min-height: 180px; font-family: monospace; font-size: .9rem;
+             padding: .6rem; box-sizing: border-box; }
+  input[type=text] { width: 100%; padding: .5rem; box-sizing: border-box; }
+  label { font-weight: 600; display: block; margin: .8rem 0 .3rem; }
+  button { margin-top: 1rem; padding: .6rem 1.4rem; font-size: 1rem; cursor: pointer;
+           background: #0b5; color: #fff; border: 0; border-radius: 6px; }
+  button:disabled { background: #999; cursor: wait; }
+  .sec { border: 1px solid #ddd; border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0; }
+  .sec h3 { margin: 0 0 .5rem; font-size: 1rem; }
+  .badge { display: inline-block; padding: .15rem .6rem; border-radius: 999px;
+           font-weight: 700; font-size: .85rem; }
+  .resolvido { background: #d4f7dd; color: #06622c; }
+  .escalar { background: #ffd9d9; color: #a11; }
+  .web { background: #e0ecff; color: #1450a0; margin-left: .4rem; }
+  pre { white-space: pre-wrap; word-wrap: break-word; background: #f7f7f7; padding: .6rem;
+        border-radius: 6px; margin: 0; font-size: .9rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { text-align: left; border-bottom: 1px solid #eee; padding: .35rem .4rem;
+           vertical-align: top; }
+  .fonte-web { color: #1450a0; font-weight: 600; }
+  .muted { color: #666; font-size: .8rem; }
+</style>
+</head>
+<body>
+  <h2>🧪 Painel de teste — Suporte TOTVS IA</h2>
+  <div class="aviso"><b>Ambiente de teste.</b> Roda o pipeline real (RAG → Claude → decisão),
+    mas <b>não escreve no Freshdesk nem envia WhatsApp</b>. Tudo aqui é só visualização.</div>
+
+  <label for="texto">Texto do chamado (cole aqui)</label>
+  <textarea id="texto" placeholder="Cole o assunto + descrição do chamado..."></textarea>
+  <label for="empresa">Empresa (opcional — texto colado não vem do Freshdesk)</label>
+  <input type="text" id="empresa" placeholder="ex.: Cliente ACME"/>
+  <button id="btn" onclick="processar()">Processar</button>
+
+  <div id="resultado"></div>
+
+<script>
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function tabelaPares(pares){
+  if(!pares.length) return '<p class="muted">(nenhum item recuperado)</p>';
+  let linhas = pares.map(p => {
+    let origem = p.fonte === 'documentacao' ? ('DOC — ' + esc(p.titulo||'sem título'))
+      : p.fonte === 'web_totvs' ? '<span class="fonte-web">BUSCA WEB (menos verificada)</span>'
+      : ('chamado #' + esc(p.ticket_id));
+    let emp = p.empresa ? (' <span class="muted">['+esc(p.empresa)+']</span>') : '';
+    let d = p.fonte === 'web_totvs' ? '—' : p.distancia.toFixed(4);
+    let trecho = esc(p.problema).slice(0,160);
+    return `<tr><td>${origem}${emp}</td><td>${d}</td><td>${trecho}</td></tr>`;
+  }).join('');
+  return `<table><tr><th>Fonte / título</th><th>Distância</th><th>Trecho (problema)</th></tr>${linhas}</table>`;
+}
+
+async function processar(){
+  const texto = document.getElementById('texto').value.trim();
+  const empresa = document.getElementById('empresa').value;
+  const out = document.getElementById('resultado');
+  const btn = document.getElementById('btn');
+  if(!texto){ out.innerHTML = '<p class="muted">Cole o texto do chamado primeiro.</p>'; return; }
+  btn.disabled = true; out.innerHTML = '<p class="muted">Processando (RAG + Claude)...</p>';
+  try {
+    const resp = await fetch('/teste/processar', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({texto, empresa})
+    });
+    if(!resp.ok){
+      out.innerHTML = '<p style="color:#a11">Erro '+resp.status+': '+esc(await resp.text())+'</p>';
+      return;
+    }
+    const d = await resp.json();
+    const cls = d.decisao === 'resolvido' ? 'resolvido' : 'escalar';
+    const web = d.via_web ? '<span class="badge web">via BUSCA WEB</span>' : '';
+    const oper = d.pedido_operacional ? '<span class="badge web">🔧 PEDIDO OPERACIONAL</span>' : '';
+    const meta = 'confiança: '+esc(d.confianca)+' · encontrou_solução: '+d.encontrou_solucao
+      +' · pedido_operacional: '+d.pedido_operacional
+      +' · urgência: '+esc(d.urgencia)+' · empresa: '+esc(d.empresa);
+    let html = ''
+      + '<div class="sec"><h3>Decisão</h3>'
+      +   '<span class="badge '+cls+'">'+esc(d.decisao.toUpperCase())+'</span> '
+      +   '<span class="muted">'+meta+'</span> '+web+' '+oper+'</div>'
+      + '<div class="sec"><h3>Rascunho de resposta (iria ao cliente)</h3><pre>'
+      +   esc(d.resposta_cliente)+'</pre></div>'
+      + '<div class="sec"><h3>Nota interna (seria criada no Freshdesk)</h3><pre>'
+      +   esc(d.nota)+'</pre></div>'
+      + '<div class="sec"><h3>WhatsApp (seria enviado)</h3><pre>'+esc(d.whatsapp)+'</pre></div>'
+      + '<div class="sec"><h3>Pares recuperados na base ('+d.pares.length+')</h3>'
+      +   tabelaPares(d.pares)+'</div>';
+    if(d.pares_web.length){
+      html += '<div class="sec"><h3>Trechos da busca web ('+d.pares_web.length+')</h3>'
+        + tabelaPares(d.pares_web)+'</div>';
+    }
+    out.innerHTML = html;
+  } catch(e){
+    out.innerHTML = '<p style="color:#a11">Falha: '+esc(e)+'</p>';
+  } finally { btn.disabled = false; }
+}
+</script>
+</body>
+</html>

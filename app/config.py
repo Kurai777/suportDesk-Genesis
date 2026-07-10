@@ -49,6 +49,22 @@ class Settings(BaseSettings):
     # RESPONSAVEIS={"67": "5511999999999"}
     responsaveis: dict[str, str] = Field(default_factory=dict)
 
+    # --- Busca web (último recurso, ADR-015) ---
+    # false = desligada (padrão seguro). Só dispara quando a base local (chamados +
+    # docs) não resolveu; consulta restrita aos domínios oficiais TOTVS.
+    busca_web_ativa: bool = False
+
+    # --- Interface de teste local (ADR-019) ---
+    # false = rotas /teste desativadas (padrão seguro — NÃO expor em produção, pois a
+    # tela mostra os pares recuperados). Ligue só em ambiente local para inspecionar.
+    interface_teste_ativa: bool = False
+
+    # --- Leitura de imagens dos chamados (visão, ADR-023) ---
+    # true = chamados novos com anexo de imagem têm o texto legível (prints de erro/logs)
+    # transcrito e concatenado à query do RAG. Best-effort: falha na imagem não derruba o
+    # chamado. Desligue (false) para pular a leitura de imagens.
+    leitura_imagens_ativa: bool = True
+
     # --- Regra de negócio ---
     confianca_minima: str = "alta"
 

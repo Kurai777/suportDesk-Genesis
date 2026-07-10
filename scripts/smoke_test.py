@@ -32,6 +32,7 @@ from app.config import get_settings
 from app.models import ResultadoChamado
 from app.pipeline import _nota, _whatsapp, decidir
 from app.rag import RagRepository, RagService, VoyageClient
+from app.texto import limpar_texto
 from app.whatsapp import WhatsAppClient
 
 PROBLEMA_PADRAO = (
@@ -43,7 +44,7 @@ PROBLEMA_PADRAO = (
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    problema = sys.argv[1] if len(sys.argv) > 1 else PROBLEMA_PADRAO
+    problema = limpar_texto(sys.argv[1] if len(sys.argv) > 1 else PROBLEMA_PADRAO)
     # Força dry-run: este script nunca envia WhatsApp real.
     settings = get_settings().model_copy(update={"whatsapp_dry_run": True})
 
