@@ -169,6 +169,7 @@ class TesteResposta(BaseModel):
     resumo_para_responsavel: str
     urgencia: str
     via_web: bool  # se a busca web foi acionada
+    query_web: str  # a query REAL enviada aos domínios TOTVS ("" = web não acionada)
     nota: str  # nota interna que SERIA criada no Freshdesk
     whatsapp: str  # mensagem que SERIA enviada no WhatsApp
     pares: list[ParInspecao]  # recuperação local

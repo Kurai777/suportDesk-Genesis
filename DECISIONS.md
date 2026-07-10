@@ -714,3 +714,31 @@ Um módulo só é considerado PRONTO quando:
   com que a base local falha (quantos % dos chamados caem em ESCALAR por falta de contexto). Se a
   base local resolve a grande maioria, o ROI desta fase — frente aos riscos (a)/(b) — pode não se
   justificar. A medição decide; hoje não há número para sustentar o esforço.
+
+## ADR-027 — Busca web LIGADA + visível na interface de teste
+
+- **Contexto:** a busca web (ADR-015) já funcionava, mas vinha DESLIGADA por padrão
+  (`BUSCA_WEB_ATIVA=false`) e, quando disparava, a interface `/teste` não mostrava o que ela
+  pesquisou nem de onde tirou o conteúdo — só um rótulo genérico "Trecho recuperado por busca web".
+  Diagnóstico (a pedido) confirmou: o mecanismo está saudável (ddgs devolve URLs oficiais, extração
+  via API do Zendesk funciona, ~16s por consulta); o que faltava era ligar e dar visibilidade.
+- **Decisão 1 — ligar:** `BUSCA_WEB_ATIVA=true` no `.env`. O `.env.example` documenta ao lado o
+  **trade-off de latência**: ~16s por consulta, SÓ na cauda (chamado que ia escalar); no webhook roda
+  em background (o Freshdesk já recebeu 200), mas na interface `/teste` a espera É sentida.
+- **Decisão 2 — visível na interface:** a `Inspecao` (e o `TesteResposta`) ganham `query_web` — a
+  string REAL enviada ao buscador, incluindo a restrição `site:` aos domínios oficiais. É preenchida
+  sempre que a busca web DISPARA (mesmo que volte vazia), para o revisor ver exatamente o que foi
+  pesquisado. `_montar_query` virou público (`montar_query_web`) para ser a ÚNICA fonte dessa string
+  (sem duplicar a lista de domínios na tela). O `/teste` passa a mostrar uma seção "🌐 Busca web —
+  último recurso" com a query e uma tabela dos trechos (link oficial clicável + texto extraído,
+  parseados do `solucao` no formato `[url]\ntexto`); se disparou e não voltou nada, diz isso.
+- **A busca web pesquisa com o `problema` limpo, não com a query reformulada (ADR-024):** decisão
+  mantida — a reformulação foi calibrada para o vocabulário da base vetorial local; o buscador web
+  lida bem com linguagem natural. Não alterado aqui.
+- **Correção de robustez (tests herméticos):** ligar a flag no `.env` revelou que o fixture `settings`
+  do conftest lia o `.env` do desenvolvedor para as flags fora dos kwargs — a suíte dependia do
+  ambiente. Corrigido com `_env_file=None` no fixture: os testes agora usam os defaults do código,
+  independentes do `.env`. Cada teste que precisa de uma flag ligada usa `model_copy` explicitamente.
+- **Testes (zero rede/paga):** web dispara → `query_web` exposto com a restrição `site:` e os
+  `pares_web` rotulados `web_totvs`; web dispara mas volta vazia → `query_web` ainda aparece, decisão
+  mantém ESCALAR; web desligada → `query_web=""` e buscador nunca chamado. **171 passando, ruff limpo.**

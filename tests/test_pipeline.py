@@ -449,6 +449,7 @@ async def test_inspecionar_escalar(settings):
     assert insp.decisao is Decisao.ESCALAR
     assert "⚠️ IA não encontrou solução na base" in insp.nota
     assert "🔴 Chamado #101" in insp.whatsapp
+    assert insp.query_web == ""  # web desligada -> nada foi pesquisado na web
 
 
 async def test_inspecionar_aciona_web_e_expoe_pares_web(settings):
@@ -468,8 +469,33 @@ async def test_inspecionar_aciona_web_e_expoe_pares_web(settings):
 
     assert insp.via_web is True
     assert insp.pares_web and insp.pares_web[0].fonte == "web_totvs"
+    # ADR-027: a interface expõe a query REAL enviada aos domínios oficiais.
+    assert insp.query_web
+    assert "site:centraldeatendimento.totvs.com" in insp.query_web
     assert insp.decisao is Decisao.RESOLVIDO
     assert "🌐 Rascunho gerado a partir de BUSCA WEB" in insp.nota
+
+
+async def test_inspecionar_web_vazia_expoe_query_mas_mantem_escala(settings):
+    # A busca web disparou mas não achou nada nos domínios: a query pesquisada ainda deve
+    # aparecer (para o revisor ver o que foi buscado), sem virar resolução (ADR-027).
+    web = FakeBuscaWeb(trechos=[])
+    claude = FakeClaudeRoteia(
+        local=_resposta(encontrou=False, confianca="baixa"),
+        web=_resposta(encontrou=True, confianca="media"),
+    )
+
+    insp = await inspecionar(
+        _ticket(),
+        settings=_settings_web_on(settings),
+        rag_service=FakeRag([]),
+        claude=claude,
+        busca_web=web,
+    )
+
+    assert insp.via_web is False and insp.pares_web == []
+    assert insp.query_web and "site:tdn.totvs.com" in insp.query_web  # buscou, e mostra o quê
+    assert insp.decisao is Decisao.ESCALAR
 
 
 # --- tom ao cliente × verdade técnica ao time (ADR-020) --------------------

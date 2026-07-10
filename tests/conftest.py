@@ -39,4 +39,9 @@ _SETTINGS_KWARGS = {
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(**_SETTINGS_KWARGS)
+    # `_env_file=None`: NÃO lê o .env do desenvolvedor. As flags de feature (busca_web_ativa,
+    # reformular_query_ativa, leitura_imagens_ativa, interface_teste_ativa) não estão nos kwargs;
+    # sem isto, o pydantic-settings as preencheria a partir do .env local, tornando a suíte
+    # dependente do ambiente (ex.: ligar BUSCA_WEB_ATIVA=true no .env quebraria testes de flag
+    # desligada). Cada teste que precisa de uma flag ligada usa model_copy explicitamente.
+    return Settings(**_SETTINGS_KWARGS, _env_file=None)  # type: ignore[call-arg]

@@ -64,6 +64,20 @@ function tabelaPares(pares){
   return `<table><tr><th>Fonte / título</th><th>Distância</th><th>Trecho (problema)</th></tr>${linhas}</table>`;
 }
 
+function tabelaWeb(pares){
+  // Cada par web traz em `solucao` o texto no formato "[url]\ntrecho extraído".
+  if(!pares.length) return '<p class="muted">A busca web disparou, mas não retornou trechos úteis dos domínios oficiais.</p>';
+  let linhas = pares.map(p => {
+    let m = String(p.solucao||'').match(/^\[([^\]]+)\]\n?([\s\S]*)$/);
+    let url = m ? m[1] : '';
+    let texto = m ? m[2] : String(p.solucao||'');
+    let link = url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>` : '<span class="muted">(sem URL)</span>';
+    let corte = texto.length > 300 ? esc(texto.slice(0,300))+'…' : esc(texto);
+    return `<tr><td>${link}</td><td>${corte}</td></tr>`;
+  }).join('');
+  return `<table><tr><th>Fonte (link oficial TOTVS)</th><th>Trecho extraído</th></tr>${linhas}</table>`;
+}
+
 function lerImagem(file){
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -123,9 +137,11 @@ async function processar(){
       + '<div class="sec"><h3>WhatsApp (seria enviado)</h3><pre>'+esc(d.whatsapp)+'</pre></div>'
       + '<div class="sec"><h3>Pares recuperados na base ('+d.pares.length+')</h3>'
       +   tabelaPares(d.pares)+'</div>';
-    if(d.pares_web.length){
-      html += '<div class="sec"><h3>Trechos da busca web ('+d.pares_web.length+')</h3>'
-        + tabelaPares(d.pares_web)+'</div>';
+    if(d.query_web){
+      html += '<div class="sec"><h3>🌐 Busca web — último recurso (domínios oficiais TOTVS)</h3>'
+        + '<p class="muted">A base local não resolveu; esta é a query enviada ao buscador '
+        + '(restrita aos domínios oficiais):</p><pre>'+esc(d.query_web)+'</pre>'
+        + tabelaWeb(d.pares_web)+'</div>';
     }
     out.innerHTML = html;
   } catch(e){

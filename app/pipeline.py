@@ -14,7 +14,7 @@ from enum import StrEnum
 
 import psycopg
 
-from app.busca_web import BuscaWebClient
+from app.busca_web import BuscaWebClient, montar_query_web
 from app.claude_client import ClaudeClient
 from app.config import Settings
 from app.freshdesk import FreshdeskClient
@@ -157,6 +157,7 @@ class Inspecao:
     decisao: Decisao
     via_web: bool
     pares_web: list[Similar] = field(default_factory=list)  # trechos web (se acionada)
+    query_web: str = ""  # a query REAL enviada aos domínios TOTVS ("" = web não acionada)
     nota: str = ""  # nota interna que SERIA criada no Freshdesk
     whatsapp: str = ""  # mensagem que SERIA enviada no WhatsApp
 
@@ -212,6 +213,7 @@ async def inspecionar(
     # Pedido operacional NÃO vai à web — é execução humana, não uma dúvida pesquisável.
     via_web = False
     pares_web: list[Similar] = []
+    query_web = ""
     if (
         settings.busca_web_ativa
         and busca_web is not None
@@ -219,6 +221,9 @@ async def inspecionar(
         and not resposta.encontrou_solucao
         and not resposta.pedido_operacional
     ):
+        # Registra a query REAL enviada aos domínios TOTVS (mesmo que a web volte vazia),
+        # para a interface mostrar exatamente o que foi pesquisado (ADR-027).
+        query_web = montar_query_web(problema)
         resposta, decisao, via_web, pares_web = await _tentar_busca_web(
             problema, ticket.id, resposta, decisao, busca_web=busca_web, claude=claude
         )
@@ -231,6 +236,7 @@ async def inspecionar(
         decisao=decisao,
         via_web=via_web,
         pares_web=pares_web,
+        query_web=query_web,
         nota=_nota(decisao, resposta, via_web=via_web),
         whatsapp=_whatsapp(decisao, ticket.id, ticket.empresa, via_web=via_web),
     )

@@ -177,6 +177,7 @@ def _para_resposta(insp: Inspecao, empresa: str) -> TesteResposta:
         resumo_para_responsavel=r.resumo_para_responsavel,
         urgencia=r.urgencia,
         via_web=insp.via_web,
+        query_web=insp.query_web,
         nota=insp.nota,
         whatsapp=insp.whatsapp,
         pares=[_par_para_modelo(p) for p in insp.pares],

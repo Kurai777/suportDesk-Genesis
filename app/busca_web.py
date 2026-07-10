@@ -71,8 +71,11 @@ def _chave_cache(problema: str) -> str:
     return hashlib.sha256(normalizado.encode()).hexdigest()
 
 
-def _montar_query(problema: str) -> str:
-    """Query enxuta + restrição aos domínios oficiais."""
+def montar_query_web(problema: str) -> str:
+    """Query enxuta + restrição aos domínios oficiais — a string REAL enviada ao buscador.
+
+    Pública para o pipeline/interface poderem exibir EXATAMENTE o que foi pesquisado (ADR-027).
+    """
     nucleo = " ".join(problema.split())[:_MAX_CHARS_QUERY]
     return f"{nucleo} {_DOMINIOS}"
 
@@ -119,7 +122,7 @@ class BuscaWebClient:
 
     async def _buscar_sem_cache(self, problema: str) -> list[str]:
         try:
-            resultados = await asyncio.to_thread(self._buscador, _montar_query(problema))
+            resultados = await asyncio.to_thread(self._buscador, montar_query_web(problema))
         except Exception as exc:  # rate limit, bloqueio, rede — melhor esforço
             logger.warning("Busca web: consulta ao buscador falhou (%s).", exc)
             return []
