@@ -243,6 +243,28 @@ async def test_fluxo_resolvido(settings):
     assert "✅ Chamado #101 da Empresa A" in texto
 
 
+async def test_fluxo_com_grupo_configurado_notifica_o_grupo(settings):
+    # Com WHATSAPP_GRUPO_DESTINO setado, o feedback vai ao GRUPO, não ao responsável (ADR-029).
+    grupo = "120363018941234567@g.us"
+    cfg = settings.model_copy(update={"whatsapp_grupo_destino": grupo})
+    fd = FakeFreshdesk(ticket=_ticket(responder_id=55))
+    wa = FakeWhatsApp()
+
+    await processar(
+        101,
+        settings=cfg,
+        idempotencia=FakeIdempotencia(),
+        freshdesk=fd,
+        rag_service=FakeRag([Similar(1, "p", "s", "Empresa A", 0.1)]),
+        claude=FakeClaude(resposta=_resposta(True, "alta")),
+        whatsapp=wa,
+    )
+
+    assert fd.atribuicoes == [(101, 55)]  # atribuição ao responsável segue igual
+    numero, _ = wa.enviados[0]
+    assert numero == grupo  # mas a notificação vai ao grupo
+
+
 # --- fluxo escalar ---------------------------------------------------------
 
 

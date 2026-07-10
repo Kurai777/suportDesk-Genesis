@@ -13,10 +13,14 @@ esquecer a flag ligada nunca dispara mensagem sem querer. Depois do teste, volte
 WHATSAPP_DRY_RUN=true: o `WhatsAppClient` relê a flag a cada `enviar()`, então em true
 toda notificação vira só log, sem tocar a Evolution.
 
+Aceita um TELEFONE ou um JID de GRUPO (ADR-029) como destino — para testar o grupo, passe o
+JID (descubra-o com scripts/lista_grupos_whatsapp).
+
 Uso:
     # no .env: WHATSAPP_DRY_RUN=false (e as 3 variáveis da Evolution preenchidas)
     python -m scripts.testa_whatsapp 5511999999999
     python -m scripts.testa_whatsapp 5511999999999 "Mensagem de teste personalizada"
+    python -m scripts.testa_whatsapp 120363018941234567@g.us "Teste no grupo"
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ import sys
 import httpx
 
 from app.config import Settings, get_settings
-from app.whatsapp import WhatsAppClient, normalizar_numero
+from app.whatsapp import WhatsAppClient, resolver_destino
 
 _MSG_PADRAO = (
     "🤖 Teste do Suporte TOTVS IA (Genesis). Se você recebeu esta mensagem, a "
@@ -115,8 +119,10 @@ def main() -> int:
         )
         return 1
 
-    destino = normalizar_numero(numero)
-    print(f"→ Enviando mensagem REAL para {destino} (instância: {settings.whatsapp_instance})...")
+    destino = resolver_destino(numero)
+    tipo = "grupo" if "@g.us" in destino else "número"
+    print(f"→ Enviando mensagem REAL para o {tipo} {destino} "
+          f"(instância: {settings.whatsapp_instance})...")
     sucesso, detalhe = asyncio.run(enviar_teste(settings, numero, texto))
 
     if sucesso:

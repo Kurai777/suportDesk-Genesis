@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Mapa id_do_agente (Freshdesk responder_id, como string) -> telefone. Ex. (.env):
     # RESPONSAVEIS={"67": "5511999999999"}
     responsaveis: dict[str, str] = Field(default_factory=dict)
+    # Grupo do WhatsApp que recebe TODOS os feedbacks (ADR-029). É o JID do grupo na Evolution
+    # (ex.: 120363018941234567@g.us), NÃO um telefone. Descubra com scripts/lista_grupos_whatsapp.
+    # Vazio = mantém o modelo antigo (notifica o telefone do responsável).
+    whatsapp_grupo_destino: str = ""
 
     # --- Busca web (último recurso, ADR-015) ---
     # false = desligada (padrão seguro). Só dispara quando a base local (chamados +
@@ -86,6 +90,17 @@ class Settings(BaseSettings):
             if telefone:
                 return telefone
         return self.whatsapp_responsavel_default
+
+    def destino_notificacao(self, agente_id: int | None) -> str:
+        """Destino do WhatsApp: o GRUPO da equipe (se configurado) ou o telefone do responsável.
+
+        Fase 1 (ADR-029): com WHATSAPP_GRUPO_DESTINO preenchido, TODO chamado notifica o grupo —
+        o `agente_id` é ignorado. Sem ele, cai no `telefone_responsavel` (comportamento anterior).
+        """
+        grupo = self.whatsapp_grupo_destino.strip()
+        if grupo:
+            return grupo
+        return self.telefone_responsavel(agente_id)
 
 
 @lru_cache

@@ -54,6 +54,7 @@ python -m scripts.testa_whatsapp 5511999999999 "Mensagem de teste"
 ```
 
 O número pode vir com ou sem DDI/símbolos — o script normaliza (DDD+número ganha o DDI 55).
+Para testar o envio a um **grupo**, passe o JID no lugar do número (ver seção 7).
 
 - [ ] **Sucesso:** imprime `✅ SUCESSO` com o `HTTP 201` e o corpo da resposta da Evolution; a
       mensagem chega no aparelho conectado.
@@ -77,6 +78,37 @@ disparar WhatsApp real sem querer. Para voltar a enviar de verdade, é só pôr 
 
 ---
 
+## 7. Notificar um GRUPO em vez de um número (ADR-029)
+
+Se você quer que a IA mande o feedback dos chamados para um **grupo** da equipe (em vez do
+telefone do responsável), o fluxo é:
+
+- [ ] Com o número da IA já conectado à instância (passos 1–3), **adicione esse número ao
+      grupo** normalmente (pelo WhatsApp, como qualquer contato).
+- [ ] Descubra o **JID do grupo** (um grupo não é um telefone — é um id tipo
+      `120363018941234567@g.us`):
+      ```bash
+      python -m scripts.lista_grupos_whatsapp
+      ```
+      Ele lista os grupos da instância com nome + JID. (Só leitura, não envia nada; não depende
+      de `WHATSAPP_DRY_RUN`.)
+- [ ] Copie o JID do grupo certo para o `.env`:
+      ```
+      WHATSAPP_GRUPO_DESTINO=120363018941234567@g.us
+      ```
+      Com essa variável **preenchida**, TODO chamado passa a notificar o grupo (o mapa
+      `RESPONSAVEIS`/telefone é ignorado). **Vazia** = volta ao modelo antigo (telefone do
+      responsável).
+- [ ] Teste o envio ao grupo (com `WHATSAPP_DRY_RUN=false`):
+      ```bash
+      python -m scripts.testa_whatsapp 120363018941234567@g.us "Teste no grupo"
+      ```
+
+> O número da IA precisa **ser membro** do grupo para conseguir enviar. Se a Evolution
+> responder erro ao enviar, confirme que o número foi adicionado ao grupo.
+
+---
+
 ## Referência rápida das variáveis
 
 | Variável | O que é | De onde vem |
@@ -85,6 +117,7 @@ disparar WhatsApp real sem querer. Para voltar a enviar de verdade, é só pôr 
 | `WHATSAPP_INSTANCE` | Nome da instância | Passo 2 |
 | `WHATSAPP_API_KEY` | Token **da instância** (não o global) | Passo 2 (criação da instância) |
 | `WHATSAPP_DRY_RUN` | `false` p/ enviar de verdade; `true` p/ só logar | Passo 4 (teste) → Passo 6 (voltar) |
+| `WHATSAPP_GRUPO_DESTINO` | JID do grupo que recebe os feedbacks (opcional) | Passo 7 (`lista_grupos_whatsapp`) |
 
 > O `WHATSAPP_RESPONSAVEL_DEFAULT` e o mapa `RESPONSAVES` (agente→telefone) são usados pelo
 > **pipeline** para decidir o destinatário de cada chamado — o script de teste não precisa

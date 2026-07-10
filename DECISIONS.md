@@ -768,3 +768,31 @@ Um módulo só é considerado PRONTO quando:
 - **Testes (respx, zero envio real/pago):** config incompleta é detectada e nomeada; sucesso captura
   a resposta da Evolution; falha HTTP mostra o corpo do erro; falha de rede reporta "sem resposta"; o
   número é normalizado (DDI 55) no corpo enviado. **177 passando, ruff limpo.**
+
+## ADR-029 — Notificação para um GRUPO do WhatsApp (destino único da equipe)
+
+- **Contexto/decisão de produto:** em vez de notificar o telefone privado do responsável de cada
+  chamado, a equipe quer que TODO feedback caia num **grupo** único do WhatsApp da IA. Escolha do
+  usuário: "só um grupo" (não grupo+privado).
+- **Grupo é JID, não telefone:** no WhatsApp/Evolution um grupo é endereçado por um **JID** terminado
+  em `@g.us` (ex.: `120363018941234567@g.us`), não por um número. O mesmo endpoint
+  `message/sendText/{instance}` aceita telefone OU JID no campo `number`.
+- **`resolver_destino` (whatsapp.py):** ponto único que decide o destino — se contém `@`, é um JID e
+  passa INTACTO; senão, é telefone e vai por `normalizar_numero`. Isso conserta o risco real: o
+  `normalizar_numero` (tira tudo que não é dígito) DESTRUIRIA um `@g.us`. O `enviar` agora usa
+  `resolver_destino`; o teste `testa_whatsapp` idem (aceita telefone ou JID).
+- **`Settings.destino_notificacao(agente_id)` + `WHATSAPP_GRUPO_DESTINO`:** com o JID do grupo
+  configurado, TODO chamado notifica o grupo (o `agente_id`/mapa RESPONSAVEIS é ignorado); VAZIO,
+  cai no `telefone_responsavel` — o modelo antigo segue como fallback seguro. O pipeline (`processar`
+  e `_fallback_seguro`) troca `telefone_responsavel` por `destino_notificacao`.
+- **Descobrir o JID — `scripts/lista_grupos_whatsapp.py` + `WhatsAppClient.listar_grupos()`:** lista
+  os grupos da instância (`GET group/fetchAllGroups`) como nome + JID, para o operador copiar o certo
+  ao `.env`. É setup/leitura (não envia, não depende de `WHATSAPP_DRY_RUN`). Requisito operacional: o
+  número da IA precisa SER MEMBRO do grupo para enviar (documentado em TESTE_WHATSAPP.md §7).
+- **Escopo:** só o roteamento do destino + as ferramentas de setup. Não mexe no deploy nem na
+  migração p/ Meta Cloud API. O `dry-run` continua valendo (o grupo só recebe de verdade com
+  `WHATSAPP_DRY_RUN=false`).
+- **Testes (respx, zero envio real):** `resolver_destino` preserva o JID e normaliza telefone;
+  `destino_notificacao` prefere o grupo e cai no telefone quando vazio; `enviar` manda o JID intacto
+  no corpo; `listar_grupos` parseia jid+nome e descarta grupo sem id; pipeline com grupo configurado
+  notifica o grupo (mantendo a atribuição ao responsável). **184 passando, ruff limpo.**

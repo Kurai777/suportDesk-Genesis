@@ -375,9 +375,9 @@ async def processar(
     if ticket.responder_id is not None:
         await freshdesk.atribuir(ticket_id, ticket.responder_id)
 
-    # 7. WhatsApp por último (melhor esforço).
-    telefone = settings.telefone_responsavel(ticket.responder_id)
-    await whatsapp.enviar(telefone, insp.whatsapp)
+    # 7. WhatsApp por último (melhor esforço). Grupo da equipe, se configurado (ADR-029).
+    destino = settings.destino_notificacao(ticket.responder_id)
+    await whatsapp.enviar(destino, insp.whatsapp)
 
 
 async def _fallback_seguro(
@@ -397,5 +397,5 @@ async def _fallback_seguro(
     except Exception:
         logger.exception("Fallback: falha ao registrar no Freshdesk (ticket %s).", ticket_id)
     # WhatsApp sempre (melhor esforço, não levanta) — o humano precisa ser avisado.
-    telefone = settings.telefone_responsavel(responder_id)
-    await whatsapp.enviar(telefone, _whatsapp(Decisao.ESCALAR, ticket_id, empresa))
+    destino = settings.destino_notificacao(responder_id)
+    await whatsapp.enviar(destino, _whatsapp(Decisao.ESCALAR, ticket_id, empresa))

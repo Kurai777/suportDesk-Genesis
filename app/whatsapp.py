@@ -44,6 +44,19 @@ def normalizar_numero(numero: str) -> str:
     return digitos
 
 
+def resolver_destino(destino: str) -> str:
+    """Destino aceito pela Evolution: um JID (grupo/contato) passa intacto; telefone é normalizado.
+
+    Grupos do WhatsApp NÃO são telefones — são JIDs terminados em `@g.us` (ex.:
+    120363...@g.us); contatos, em `@s.whatsapp.net`. Qualquer coisa com `@` já é um JID e
+    NÃO pode passar por `normalizar_numero` (que apagaria o `@g.us`). Ver ADR-029.
+    """
+    d = destino.strip()
+    if "@" in d:
+        return d
+    return normalizar_numero(d)
+
+
 class WhatsAppClient:
     """Envia mensagens de texto via Evolution API v2. Recebe `Settings` por injeção."""
 
@@ -57,8 +70,12 @@ class WhatsAppClient:
         self._client = client or httpx.AsyncClient(timeout=15.0)
 
     async def enviar(self, numero: str, texto: str) -> bool:
-        """Envia `texto` para `numero` (melhor esforço). Retorna sucesso/falha."""
-        destino = normalizar_numero(numero)
+        """Envia `texto` para `numero` (melhor esforço). Retorna sucesso/falha.
+
+        `numero` pode ser um telefone (normalizado) OU um JID de grupo `...@g.us` (ADR-029) —
+        o mesmo endpoint da Evolution aceita os dois no campo `number`.
+        """
+        destino = resolver_destino(numero)
 
         if self._dry_run:
             logger.info("[WhatsApp dry-run] Para %s enviaria: %s", destino, texto)
@@ -86,6 +103,31 @@ class WhatsAppClient:
             json={"number": destino, "text": texto},
         )
         resp.raise_for_status()
+
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(_TENTATIVAS),
+        wait=wait_exponential(multiplier=0.1, max=_ESPERA_MAX),
+        retry=retry_if_exception_type(httpx.RequestError),
+    )
+    async def listar_grupos(self) -> list[dict[str, str]]:
+        """Lista os grupos da instância como `{"jid", "nome"}` (ADR-029).
+
+        Ferramenta de SETUP: serve para descobrir o JID do grupo que vai em
+        WHATSAPP_GRUPO_DESTINO. Não é usada no fluxo do chamado. Levanta em erro HTTP/rede
+        (o chamador — o script — trata e reporta).
+        """
+        url = f"{self._base_url}/group/fetchAllGroups/{self._instance}"
+        resp = await self._client.get(
+            url, headers={"apikey": self._apikey}, params={"getParticipants": "false"}
+        )
+        resp.raise_for_status()
+        grupos = resp.json() or []
+        return [
+            {"jid": g.get("id", ""), "nome": g.get("subject", "") or "(sem nome)"}
+            for g in grupos
+            if g.get("id")
+        ]
 
     async def close(self) -> None:
         await self._client.aclose()
