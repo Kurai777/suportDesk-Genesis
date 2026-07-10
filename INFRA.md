@@ -28,50 +28,85 @@
 | **`pg_dump -Fc -Z9`** | **37 MB** |
 | Stack | Postgres 16.14 · pgvector 0.8.4 · `VECTOR(1024)` |
 
-Hoje: container `suporte-totvs-db` (docker-compose), host **5433** → 5432, db `suporte_totvs`.
+## ✅ Estado atual — a base vive no Neon (opção A, aplicada em 2026-07-10)
+
+| | |
+|---|---|
+| Projeto Neon | **Genesis** (`bold-field-49175189`), org `brunoeted@gmail.com` |
+| Região / versão | `aws-us-east-1` · **Postgres 18.4** · pgvector **0.8.1** |
+| Banco | `neondb` · role `neondb_owner` |
+| Conteúdo | **8.350 linhas** (8.325 doc + 25 ticket), 0 sem embedding, 1024 dims, índice HNSW recriado, 120 MB |
+
+Restaurado a partir do `base_conhecimento.dump` (37 MB) — os embeddings vieram prontos,
+**nada foi re-embeddado**. Verificado: busca vetorial com parâmetro `Vector` pelo mesmo
+adapter `psycopg + pgvector` que o app usa.
+
+O `.env` do desktop já aponta para lá; a `DATABASE_URL` local do docker ficou **comentada
+dentro do próprio `.env`** como backup.
+
+O container local `suporte-totvs-db` (host **5433**, db `suporte_totvs`) continua existindo e
+serve agora só para (a) o banco de TESTES `suporte_totvs_test` e (b) gerar novos dumps.
+
+### Configurar o notebook (ou qualquer máquina nova)
+
+Não precisa de docker, nem de `docs_totvs/`, nem do dump:
+
+1. `git clone` + `pip install -r requirements.txt`
+2. Copie o `.env` (traga os segredos por um canal seguro — **nunca** por git/Drive público).
+3. `python run_local.py` — o RAG já lê o Neon.
+
+Para rodar os testes na máquina nova é preciso um Postgres local com o banco dedicado
+`suporte_totvs_test` (`docker compose up` + `db/init.sql`), e exportar:
+
+```bash
+export TEST_DATABASE_URL=postgresql://totvs:totvs@localhost:5433/suporte_totvs_test
+```
 
 ---
 
-## Opção A — Postgres gerenciado (RECOMENDADO): acaba a transição
+Situação anterior: container `suporte-totvs-db` (docker-compose), host **5433** → 5432,
+db `suporte_totvs`.
 
-Faz-se **uma vez**. Depois, notebook e desktop só precisam de `DATABASE_URL` no `.env` —
+---
+
+## Opção A — Postgres gerenciado (FEITA): acaba a transição
+
+Feita **uma vez**. Depois, notebook e desktop só precisam de `DATABASE_URL` no `.env` —
 sem Drive, sem docker local, sem `docs_totvs/`.
 
-Provedores com pgvector: **Neon**, **Railway** (já é o alvo de deploy do CLAUDE.md), Supabase.
-Os 128 MB cabem folgado em qualquer free tier.
+Provedores com pgvector: **Neon** (escolhido), Railway, Supabase. Os 128 MB cabem folgado
+em qualquer free tier.
+
+Como foi feito (reproduzível para outro banco/provedor):
 
 ```bash
-# 1. Habilitar a extensão no banco novo
-psql "$DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+# O dump já traz `CREATE EXTENSION vector`; --no-comments pula o COMMENT ON EXTENSION,
+# que exige superuser e falharia num banco gerenciado.
+docker cp base_conhecimento.dump suporte-totvs-db:/tmp/neon.dump
+docker exec -e PGURL="$URL_DIRETO" suporte-totvs-db \
+  sh -c 'pg_restore -d "$PGURL" --no-owner --no-privileges --no-comments /tmp/neon.dump'
 
-# 2. Restaurar o dump (leva os embeddings prontos — NÃO re-embeda nada)
-pg_restore -d "$DATABASE_URL" --no-owner --no-privileges base_conhecimento.dump
-
-# 3. Conferir
-psql "$DATABASE_URL" -c 'SELECT fonte, count(*) FROM conhecimento GROUP BY fonte;'
+# Conferir
+psql "$URL_DIRETO" -c 'SELECT fonte, count(*) FROM conhecimento GROUP BY fonte;'
 ```
 
-Sem `psql`/`pg_restore` instalados, rode pelo container:
+> ⚠️ **Use o endpoint DIRETO, não o `-pooler`.** O Neon devolve por padrão a URI do pooler
+> (pgbouncer em modo transação). Isso quebra os *prepared statements* que o **psycopg3**
+> cria automaticamente (após ~5 execuções da mesma query) — estoura na ingestão em massa.
+> Basta remover o sufixo `-pooler` do host. É a URL que está no `.env`.
 
-```bash
-docker run --rm -v "$PWD:/w" -w /w postgres:16 \
-  pg_restore -d "$DATABASE_URL" --no-owner --no-privileges base_conhecimento.dump
-```
-
-Depois, no `.env` de **cada máquina** (o arquivo é ignorado pelo git):
-
-```
-DATABASE_URL=postgresql://<user>:<senha>@<host>/<db>?sslmode=require
-```
-
-E `python run_local.py` funciona direto no notebook, com zero dado local.
+> **Cliente antigo, servidor novo:** o dump saiu de um `pg_dump` **16** e foi restaurado num
+> Postgres **18**. Restaurar dump antigo em servidor novo é o caminho normal de upgrade —
+> funcionou sem erro (exit 0). O inverso (dumpar de um servidor mais novo com cliente antigo)
+> é que é proibido.
 
 > **Dev × prod:** não reaproveite o MESMO banco para desenvolvimento e produção — o
 > `ingest_docs` e experimentos escrevem na `conhecimento`. Use dois bancos (ou *branches* do
-> Neon: `main` = prod, `dev` = trabalho).
+> Neon: `main` = prod, `dev` = trabalho). **Ainda pendente.**
 >
 > **Latência:** o RAG faz **1 query** por chamado; +50–200 ms de rede é irrelevante. Só a
-> ingestão em massa (milhares de INSERTs) fica mais lenta — e é operação única.
+> ingestão em massa (milhares de INSERTs) fica mais lenta — e é operação única. O compute do
+> Neon suspende quando ocioso: a primeira query após a pausa paga um *cold start* (~0,5 s).
 
 ---
 
@@ -119,10 +154,14 @@ python -m scripts.ingest_docs
 ## Guardrails (leia antes de mexer)
 
 1. ⚠️ **`pytest` APAGA linhas.** Os testes de integração fazem `DELETE FROM conhecimento`.
-   **NUNCA** aponte `TEST_DATABASE_URL` para o banco da aplicação — muito menos para o
-   gerenciado. O default do `conftest.py` já é um `..._test` local e dedicado.
-2. `DATABASE_URL` é **segredo**: só no `.env` (ignorado pelo git). Nunca versionado.
-3. `*.dump` está no `.gitignore` — os 37 MB não vão para o repositório.
+   **NUNCA** aponte `TEST_DATABASE_URL` para o banco da aplicação — muito menos para o Neon.
+   *Verificado:* o `conftest.py` lê **apenas** `TEST_DATABASE_URL` (default `..._test` local) e
+   **nunca** a `DATABASE_URL` do `.env`; os dois usos de `get_settings` em `test_main.py` são
+   `monkeypatch`. Por construção, `pytest` **não alcança o Neon** — a suíte foi rodada depois
+   da migração e as 8.350 linhas seguiram intactas.
+2. `DATABASE_URL` é **segredo**: só no `.env` (ignorado). Nunca versionado.
+3. `.gitignore` cobre `.env`, **`.env.*`** (pega backups tipo `.env.bak.local`) com exceção de
+   `!.env.example`, além de `*.dump` (os 37 MB não vão ao repositório) e `docs_totvs/`.
 4. **Dimensão do vetor:** `db/init.sql` fixa `VECTOR(1024)` = `voyage-3`. Trocar de modelo de
    embedding exige recriar a coluna e **re-embeddar tudo**.
 5. O índice é **HNSW** (cosseno). O `pg_restore` o recria sozinho.

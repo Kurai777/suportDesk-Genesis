@@ -583,7 +583,7 @@ Um módulo só é considerado PRONTO quando:
   ticket intacto; sem anexo / sem VisaoClient / flag off → fluxo inalterado; `baixar_anexo` vai à
   URL pré-assinada sem auth; VisaoClient normaliza tipo, ignora tipo não suportado/bytes vazios.
 
-## ADR-024 — Portabilidade da base de conhecimento (PROPOSTA — aguardando escolha)
+## ADR-024 — Portabilidade da base de conhecimento (DECIDIDA — Neon, aplicada em 2026-07-10)
 
 - **Problema:** a base é carregada à mão entre máquinas (desktop ↔ notebook), hoje copiando
   `docs_totvs/` pelo Drive. Isso se repete a cada troca de máquina e não há backup nenhum.
@@ -608,5 +608,19 @@ Um módulo só é considerado PRONTO quando:
   `DATABASE_URL` é segredo (só `.env`); `*.dump` e `docs_totvs/` no `.gitignore`; dev e prod NÃO
   compartilham banco (o `ingest_docs` escreve na `conhecimento`); `VECTOR(1024)` amarra o modelo de
   embedding — trocar de modelo exige recriar a coluna e re-embeddar.
-- **Status:** proposta. Falta o Bruno escolher o provedor (A) e criar a instância; a partir daí o
-  `.env` de cada máquina só troca a `DATABASE_URL`.
+- **Executado (A):** projeto Neon **Genesis** (`bold-field-49175189`), `aws-us-east-1`, **PG 18.4**,
+  pgvector 0.8.1, db `neondb`. O dump (`pg_dump` 16) foi restaurado com `--no-owner
+  --no-privileges --no-comments` (o `COMMENT ON EXTENSION` exige superuser); exit 0. Conferido:
+  8.350 linhas (8.325 doc + 25 ticket), 0 sem embedding, 1024 dims, índice HNSW recriado, 120 MB,
+  e busca vetorial validada pelo mesmo adapter `psycopg + pgvector` do app. **Nada re-embeddado.**
+- **Endpoint DIRETO, não o `-pooler`:** o Neon entrega por padrão a URI do pooler (pgbouncer em
+  modo transação), que quebra os *prepared statements* automáticos do psycopg3 (após ~5 execuções
+  da mesma query) — estouraria na ingestão em massa. A `DATABASE_URL` do `.env` usa o host sem
+  `-pooler`. A antiga (docker local) ficou comentada dentro do próprio `.env` como backup.
+- **Correção de segurança durante a migração:** o backup `.env.bak.local` **não** era coberto pelo
+  `.gitignore`. Adicionado `.env.*` com exceção `!.env.example`. Nenhum segredo foi commitado.
+- **Guardrail verificado, não presumido:** `conftest.py` lê apenas `TEST_DATABASE_URL` (default
+  `..._test` local) e nunca a `DATABASE_URL`; os `get_settings` em `test_main.py` são monkeypatch.
+  Rodada completa após a migração: 151 passed, ruff limpo, e as 8.350 linhas do Neon **intactas**.
+- **Pendente:** separar dev × prod (bancos distintos ou branches do Neon) antes de subir a
+  produção — hoje `ingest_docs` e experimentos escrevem no mesmo banco.
