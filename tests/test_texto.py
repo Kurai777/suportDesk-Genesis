@@ -1,6 +1,6 @@
 """Testes da limpeza de texto (ADR-011) — função pura, sem I/O."""
 
-from app.texto import limpar_texto
+from app.texto import extrair_codigos_tecnicos, limpar_texto
 
 
 def test_remove_saudacao_despedida_e_assinatura():
@@ -96,3 +96,38 @@ def test_nao_corta_clausula_real_que_comeca_com_virgula():
     limpo = limpar_texto("Após análise, o problema estava no cálculo do imposto.")
     assert limpo.startswith("Após análise")
     assert "cálculo do imposto" in limpo
+
+
+# --- extrair_codigos_tecnicos (ADR-024) ------------------------------------
+
+
+def test_extrai_parametro_rotina_modulo_tabela_campo_e_erro():
+    texto = (
+        "Erro SCC19070 ao rodar MATA010 no SIGAEST. "
+        "Parâmetro MV_ATFMOED e campo B1_COD; conferir a tabela SX5."
+    )
+    assert extrair_codigos_tecnicos(texto) == [
+        "SCC19070",
+        "MATA010",
+        "SIGAEST",
+        "MV_ATFMOED",
+        "B1_COD",
+        "SX5",
+    ]
+
+
+def test_preserva_ordem_e_remove_repetidos():
+    assert extrair_codigos_tecnicos("MATA010 e SX5, de novo MATA010") == ["MATA010", "SX5"]
+
+
+def test_assunto_em_caixa_alta_sem_codigo_nao_gera_falso_positivo():
+    # O texto cru vem com assunto em CAIXA ALTA (COLETA.md); exigir dígito/prefixo evita ruído.
+    assert extrair_codigos_tecnicos("RELATÓRIO SMART VIEW NÃO ABRE PARA O USUÁRIO") == []
+
+
+def test_numero_solto_e_palavra_comum_nao_sao_codigo():
+    assert extrair_codigos_tecnicos("Nota 123456 emitida em 2024 sem erro") == []
+
+
+def test_extrair_codigos_de_texto_vazio():
+    assert extrair_codigos_tecnicos("") == []

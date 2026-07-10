@@ -66,6 +66,10 @@ class FakeClaudeE2E:
             pedido_operacional=False,
         )
 
+    async def reformular_query(self, problema):
+        # E2E: mede a recuperação real, sem inventar reformulação — busca o texto cru.
+        return problema
+
 
 class FakeFreshdesk:
     def __init__(self, ticket):

@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     # tela mostra os pares recuperados). Ligue só em ambiente local para inspecionar.
     interface_teste_ativa: bool = False
 
+    # --- Reformulação de query antes do RAG (ADR-024) ---
+    # true = o Claude reescreve o chamado como INTENÇÃO de busca antes do embedding
+    # (o texto cru, com saudação/assinatura/assunto em CAIXA ALTA, infla a distância).
+    # Custa uma chamada Haiku curta por chamado. Best-effort: falha usa o texto limpo.
+    # Afeta SÓ a busca — nunca o contexto entregue ao Claude nem o texto ao cliente.
+    reformular_query_ativa: bool = True
+
     # --- Leitura de imagens dos chamados (visão, ADR-023) ---
     # true = chamados novos com anexo de imagem têm o texto legível (prints de erro/logs)
     # transcrito e concatenado à query do RAG. Best-effort: falha na imagem não derruba o

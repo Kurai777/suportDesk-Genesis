@@ -158,6 +158,7 @@ def _para_resposta(insp: Inspecao, empresa: str) -> TesteResposta:
     return TesteResposta(
         empresa=empresa,
         problema=insp.problema,
+        query=insp.query,
         decisao=insp.decisao.value,
         encontrou_solucao=r.encontrou_solucao,
         confianca=r.confianca,

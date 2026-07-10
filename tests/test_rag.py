@@ -85,3 +85,69 @@ async def test_rag_service_embeda_query_e_delega_para_o_repo():
     assert voyage.ultima_query == "problema novo"
     assert repo.vec == [0.5, 0.5, 0.5]
     assert repo.k == 3
+
+
+# --- busca_uniao (ADR-024): merge por menor distância, dedup por trecho ----
+
+
+class _VoyagePorQuery:
+    """Embeda cada query num vetor distinto (a query vira o próprio 'vetor')."""
+
+    async def embed_query(self, texto: str) -> list[float]:
+        return [float(len(texto))]
+
+
+class _RepoPorQuery:
+    """Devolve resultados diferentes conforme a query (o vetor identifica a query)."""
+
+    def __init__(self, por_vetor: dict[float, list[Similar]]) -> None:
+        self._por_vetor = por_vetor
+        self.chamadas: list[float] = []
+
+    async def buscar_similares(self, embedding: list[float], k: int) -> list[Similar]:
+        chave = embedding[0]
+        self.chamadas.append(chave)
+        return self._por_vetor.get(chave, [])[:k]
+
+
+def _doc(titulo: str, dist: float) -> Similar:
+    return Similar(None, "prob", "sol", None, dist, fonte="documentacao", titulo=titulo)
+
+
+def _tkt(tid: int, dist: float) -> Similar:
+    return Similar(tid, "prob", "sol", "emp", dist, fonte="ticket")
+
+
+async def test_uniao_mantem_menor_distancia_por_trecho():
+    # "aa"=2.0 acha o DOC longe (0.50) e o CHAMADO perto (0.18);
+    # "bbbb"=4.0 acha o MESMO doc perto (0.30). União: doc a 0.30 + chamado a 0.18.
+    doc_longe, doc_perto = _doc("MATA010", 0.50), _doc("MATA010", 0.30)
+    chamado = _tkt(7, 0.18)
+    repo = _RepoPorQuery({2.0: [chamado, doc_longe], 4.0: [doc_perto]})
+    service = RagService(_VoyagePorQuery(), repo)
+
+    resultado = await service.buscar_uniao(["aa", "bbbb"], k=5)
+
+    assert [(p.fonte, round(p.distancia, 2)) for p in resultado] == [
+        ("ticket", 0.18),  # ordenado por distância
+        ("documentacao", 0.30),  # o doc PERTO venceu o mesmo doc longe (dedup por título)
+    ]
+
+
+async def test_uniao_ignora_queries_repetidas_e_vazias():
+    repo = _RepoPorQuery({2.0: [_tkt(1, 0.1)]})
+    service = RagService(_VoyagePorQuery(), repo)
+
+    await service.buscar_uniao(["aa", "aa", "  "], k=3)
+
+    assert repo.chamadas == [2.0]  # buscou UMA vez só (dedup de query, vazia descartada)
+
+
+async def test_uniao_de_uma_query_so_e_a_busca_simples():
+    repo = _RepoPorQuery({2.0: [_tkt(1, 0.1)]})
+    service = RagService(_VoyagePorQuery(), repo)
+
+    resultado = await service.buscar_uniao(["aa"], k=3)
+
+    assert [p.ticket_id for p in resultado] == [1]
+    assert repo.chamadas == [2.0]

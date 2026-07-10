@@ -582,3 +582,56 @@ Um módulo só é considerado PRONTO quando:
   ponta no `processar`); imagem ilegível → vazio, segue sem ela; falha no download → best-effort,
   ticket intacto; sem anexo / sem VisaoClient / flag off → fluxo inalterado; `baixar_anexo` vai à
   URL pré-assinada sem auth; VisaoClient normaliza tipo, ignora tipo não suportado/bytes vazios.
+
+## ADR-024 — Reformulação de query antes do RAG, por UNIÃO com o texto limpo
+
+- **Contexto (lever apontada no COLETA.md):** o texto cru do chamado — mesmo após o `limpar_texto`
+  (ADR-011/013) — ainda infla a distância da busca (assunto em CAIXA ALTA, "dá erro" vago, ruído de
+  e-mail). A intenção limpa (`"Como cadastrar um produto no Protheus"`) cai a ~0,31; o mesmo caso cru
+  fica a ~0,54. A hipótese: reescrever o chamado em INTENÇÃO de busca antes do embedding aproxima a
+  documentação.
+- **Medição (25 chamados reais, leave-one-out, `scripts/avaliar_reformulacao.py`), 3 braços:**
+  baseline = o texto **já limpo** que o pipeline busca hoje (não remede o ganho da limpeza regex,
+  que já existe; mede só o ganho INCREMENTAL). Resultado, separado por fonte do vizinho:
+  | Braço | d_doc (documentação) | d_ticket (chamado) | ensináveis (d_doc<0,40) | top-1 = doc |
+  |---|---|---|---|---|
+  | ANTES (texto limpo) | 0,5046 | **0,3493** | 0/25 | 11/25 |
+  | DEPOIS (só reformulada) | 0,4755 | 0,4632 ⬇ | 2/25 | 20/25 |
+  | **UNIÃO (as duas)** | **0,4686** | **0,3414** | 2/25 | 20/25 |
+- **Achado decisivo — reformular sozinho é uma TROCA, não um ganho:** aproxima a documentação
+  (−0,029) mas **afasta os chamados anteriores em +0,11**. Chamado anterior carrega a *solução real
+  de um agente* — o material mais valioso da base. Ex. real (#4214): o vizinho mais próximo era um
+  chamado a **0,1802** (quase o mesmo problema já resolvido); a reformulação o jogou para 0,51.
+- **Decisão — UNIÃO, não substituição:** buscar com o texto limpo **E** a intenção reformulada e unir
+  por MENOR distância por trecho. A documentação responde melhor à intenção; o chamado, ao texto cru.
+  A união domina os dois braços: docs ainda mais perto (0,4686, melhor dos três) e chamados
+  preservados (0,3414). Top-1 = doc sobe 11/25 → 20/25, com **flips ganhos 2, perdidos 0**.
+- **`RagService.buscar_uniao(queries, k)`:** embeda cada query única/não-vazia, busca top-k de cada e
+  une deduplicando por trecho (`_identidade`: chamado por `ticket_id`; doc por `(fonte, titulo,
+  problema)`), mantendo a menor distância. Uma query só → colapsa na `buscar` simples. O `buscar`
+  antigo fica intacto.
+- **A reformulação alimenta SÓ o embedding — NUNCA a resposta:** o `gerar_resposta` continua
+  recebendo o `problema` ÍNTEGRO (a query é compressão com perda: boa para buscar, ruim para
+  responder). Logo uma reformulação ruim degrada a recuperação, mas é **incapaz de alucinar** — a
+  regra de ouro segue ancorada nos pares recuperados.
+- **Garantia de código técnico EM CÓDIGO (não no prompt):** `texto.extrair_codigos_tecnicos` acha os
+  identificadores TOTVS (MV_*, B1_COD, SIGAFIN, MATA010, SCC19070, SX5); `claude_client._preservar_codigos`
+  reinjeta na query qualquer código que o modelo tenha descartado ao reescrever. É o sinal mais
+  discriminante da busca — mesmo espírito do `_acolhimento_padrao_se_escala` (ADR-022): a garantia
+  não confia no modelo. Prova ao vivo: e-mail ruidoso com SCC19070/MV_ATFMOED → query
+  `"Erro SCC19070 ao lançar nota fiscal parâmetro MV_ATFMOED ativo fixo"`, ambos preservados,
+  decisão RESOLVIDO.
+- **`claude_client.reformular_query`:** tool use forçado (`registrar_query` → schema `QueryReformulada`),
+  `temperature=0`, prompt próprio que PROÍBE responder o chamado e manda preservar código e descartar
+  nome/empresa/saudação. Texto curto (<10 chars) ou reformulação degenerada → devolve o `problema`
+  original (mais seguro). Retry `tenacity`, como as demais chamadas.
+- **Best-effort no pipeline:** `_query_de_busca` — falha na reformulação NUNCA derruba o chamado, cai
+  no texto limpo (= comportamento pré-ADR-024). Config `REFORMULAR_QUERY_ATIVA` (default **true**);
+  `false` pula e a união colapsa numa busca só.
+- **Interface de teste:** `Inspecao.query`/`TesteResposta.query` expõem a query reformulada; o `/teste`
+  mostra a intenção buscada e o texto íntegro que gera a resposta, lado a lado.
+- **Testes (zero rede/paga):** união mantém a menor distância por trecho e deduplica; query
+  repetida/vazia não busca duas vezes; extrator cobre parâmetro/campo/módulo/rotina/erro/tabela e
+  NÃO casa assunto em CAIXA ALTA sem código; reformulação reinjeta código descartado sem duplicar;
+  degenerada/curta cai no original; pipeline busca as duas e responde com o problema; flag off/falha
+  colapsa a união. **167 passando, ruff limpo.**

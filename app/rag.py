@@ -11,6 +11,7 @@ solucao, empresa}.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import psycopg
@@ -174,8 +175,31 @@ class RagRepository:
         return [Similar(**linha) for linha in linhas]
 
 
+def _identidade(par: Similar) -> tuple:
+    """Chave para deduplicar o MESMO trecho recuperado por queries diferentes (ADR-024)."""
+    if par.fonte == "ticket":
+        return ("ticket", par.ticket_id)
+    return (par.fonte, par.titulo, par.problema)
+
+
+def _unir(listas: list[list[Similar]], k: int) -> list[Similar]:
+    """Une recuperações de várias queries: por trecho, mantém a MENOR distância; top-k.
+
+    A distância é sempre à query que recuperou o trecho, então o mesmo alvo aparece com
+    distâncias diferentes em cada lista — ficamos com a melhor (o alvo está perto de ao
+    menos uma das intenções de busca). Ordena por distância e corta em k.
+    """
+    melhor: dict[tuple, Similar] = {}
+    for par in (p for lista in listas for p in lista):
+        chave = _identidade(par)
+        atual = melhor.get(chave)
+        if atual is None or par.distancia < atual.distancia:
+            melhor[chave] = par
+    return sorted(melhor.values(), key=lambda p: p.distancia)[:k]
+
+
 class RagService:
-    """Orquestra embedding da query + busca no pgvector."""
+    """Orquestra embedding da(s) query(s) + busca no pgvector."""
 
     def __init__(self, voyage: VoyageClient, repo: RagRepository) -> None:
         self._voyage = voyage
@@ -184,3 +208,18 @@ class RagService:
     async def buscar(self, problema: str, k: int = 5) -> list[Similar]:
         vetor = await self._voyage.embed_query(problema)
         return await self._repo.buscar_similares(vetor, k)
+
+    async def buscar_uniao(self, queries: Sequence[str], k: int = 5) -> list[Similar]:
+        """Busca com VÁRIAS queries e une (ADR-024): a documentação responde melhor à
+        intenção reformulada; o chamado anterior, ao texto cru. Buscar com as duas e ficar
+        com a menor distância por trecho pega o melhor dos dois sem escolher.
+
+        Queries repetidas ou vazias são ignoradas; sem nenhuma útil, retorna [].
+        """
+        unicas = list(dict.fromkeys(q for q in queries if q.strip()))
+        if not unicas:
+            return []
+        if len(unicas) == 1:
+            return await self.buscar(unicas[0], k)
+        listas = [await self.buscar(q, k) for q in unicas]
+        return _unir(listas, k)

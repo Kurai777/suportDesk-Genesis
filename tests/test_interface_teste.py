@@ -7,6 +7,7 @@ chamada real. O helper roda contra o banco de TESTE (vazio → recuperação ret
 
 from types import SimpleNamespace
 
+import psycopg
 import pytest
 from fastapi import HTTPException
 
@@ -19,6 +20,23 @@ from app.main import (
 )
 from app.models import EMPRESA_DESCONHECIDA, RespostaIA
 from app.pipeline import Decisao
+
+
+@pytest.fixture
+async def banco_de_teste(settings):
+    """Pula o teste se o Postgres de TESTE não estiver de pé.
+
+    O caminho de teste conecta ao banco por dentro (`_inspecao_do_texto`), então este é um
+    teste de INTEGRAÇÃO — mesmo idioma de skip dos demais (`connect_timeout=2` + `pytest.skip`),
+    para a suíte não falhar em máquina sem o banco local.
+    """
+    try:
+        conn = await psycopg.AsyncConnection.connect(
+            settings.database_url, autocommit=True, connect_timeout=2
+        )
+    except Exception:
+        pytest.skip("Postgres do docker-compose não está de pé (docker compose up -d db)")
+    await conn.close()
 
 _CANNED = RespostaIA(
     resposta_cliente="Rascunho de teste.",
@@ -41,6 +59,9 @@ class FakeClaudeCanned:
 
     async def gerar_resposta(self, problema, pares) -> RespostaIA:
         return self._resposta
+
+    async def reformular_query(self, problema) -> str:
+        return problema
 
 
 # --- página e helpers puros ------------------------------------------------
@@ -80,7 +101,7 @@ def test_teste_ativo_gate():
 # --- caminho de teste: sem Freshdesk/WhatsApp (integração, banco de teste) --
 
 
-async def test_inspecao_do_texto_nao_usa_freshdesk_nem_whatsapp(settings):
+async def test_inspecao_do_texto_nao_usa_freshdesk_nem_whatsapp(settings, banco_de_teste):
     # `state` NÃO tem freshdesk/whatsapp: se o caminho de teste os usasse, daria
     # AttributeError. Como não usa, roda normalmente. Voyage/Claude fakes = zero rede.
     app = SimpleNamespace(state=SimpleNamespace(

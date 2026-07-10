@@ -79,6 +79,24 @@ class RespostaIA(BaseModel):
     # Ela é acoplada depois em `ResultadoChamado`, montado pelo pipeline.
 
 
+class QueryReformulada(BaseModel):
+    """Contrato de saída do Claude na reformulação de query (ADR-024).
+
+    Só a INTENÇÃO de busca, nunca a resposta. Este texto alimenta EXCLUSIVAMENTE o
+    embedding da busca vetorial — não vira contexto nem chega ao cliente.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        ...,
+        description=(
+            "Uma frase curta, impessoal, no vocabulário da documentação TOTVS, com a "
+            "intenção de busca do chamado. Preserve TODOS os códigos técnicos."
+        ),
+    )
+
+
 class ResultadoChamado(BaseModel):
     """Resultado completo do processamento de um chamado, montado pelo PIPELINE.
 
@@ -124,6 +142,7 @@ class TesteResposta(BaseModel):
 
     empresa: str
     problema: str
+    query: str  # o que REALMENTE foi buscado no pgvector (reformulado, ou o problema cru)
     decisao: str  # "resolvido" | "escalar"
     encontrou_solucao: bool
     confianca: str

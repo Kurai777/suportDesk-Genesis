@@ -77,21 +77,41 @@ class FakeRag:
     def __init__(self, pares=None):
         self._pares = pares or []
         self.ultima_query = None
+        self.queries: list[str] = []  # queries da última busca (união, ADR-024)
 
     async def buscar(self, problema, k=5):
         self.ultima_query = problema
+        self.queries = [problema]
+        return self._pares
+
+    async def buscar_uniao(self, queries, k=5):
+        self.queries = list(dict.fromkeys(q for q in queries if q.strip()))
+        self.ultima_query = self.queries[-1] if self.queries else None
         return self._pares
 
 
 class FakeClaude:
-    def __init__(self, resposta=None, erro=None):
+    """`query`/`erro_query` controlam a reformulação (ADR-024); None = devolve o problema."""
+
+    def __init__(self, resposta=None, erro=None, query=None, erro_query=None):
         self._resposta = resposta
         self._erro = erro
+        self._query = query
+        self._erro_query = erro_query
+        self.problemas_recebidos: list[str] = []
+        self.reformulacoes: list[str] = []
 
     async def gerar_resposta(self, problema, pares):
+        self.problemas_recebidos.append(problema)
         if self._erro is not None:
             raise self._erro
         return self._resposta
+
+    async def reformular_query(self, problema):
+        self.reformulacoes.append(problema)
+        if self._erro_query is not None:
+            raise self._erro_query
+        return self._query if self._query is not None else problema
 
 
 class FakeWhatsApp:
@@ -127,6 +147,9 @@ class FakeClaudeRoteia:
         self.chamadas.append(list(pares))
         veio_web = any(getattr(p, "fonte", None) == "web_totvs" for p in pares)
         return self._web if veio_web else self._local
+
+    async def reformular_query(self, problema):
+        return problema
 
 
 def _ticket(responder_id=55, empresa="Empresa A"):
@@ -631,3 +654,48 @@ async def test_processar_sem_visao_fluxo_inalterado(settings):
 
     assert fd.baixados == []  # sem VisaoClient, não baixa anexos
     assert "🤖 Rascunho gerado por IA" in fd.notas[0][1]
+
+
+# --- reformulação de query antes do RAG (ADR-024) --------------------------
+# A busca é a UNIÃO do texto limpo com a intenção reformulada (a documentação responde
+# melhor à intenção; o chamado anterior, ao texto cru). A query reformulada alimenta SÓ o
+# embedding — o `gerar_resposta` recebe o problema ÍNTEGRO. Best-effort: falhar volta ao
+# texto limpo, e a união colapsa numa busca só.
+
+
+async def test_uniao_busca_texto_limpo_e_intencao_mas_responde_com_o_problema(settings):
+    rag = FakeRag([Similar(1, "p", "s", "Empresa A", 0.1)])
+    claude = FakeClaude(resposta=_resposta(True, "alta"), query="Erro SCC19070 ao lançar NF")
+
+    insp = await inspecionar(_ticket(), settings=settings, rag_service=rag, claude=claude)
+
+    # buscou com AS DUAS: o texto limpo (traz chamados) e a intenção (traz docs)
+    assert rag.queries == [insp.problema, "Erro SCC19070 ao lançar NF"]
+    assert insp.query == "Erro SCC19070 ao lançar NF"  # a interface mostra a intenção
+    # o Claude gerou a resposta a partir do problema íntegro, não da query
+    assert claude.problemas_recebidos == [insp.problema]
+    assert insp.problema != insp.query
+    assert "MV_ATFMOED" in insp.problema
+
+
+async def test_reformulacao_desligada_busca_so_o_texto_limpo(settings):
+    off = settings.model_copy(update={"reformular_query_ativa": False})
+    rag = FakeRag([Similar(1, "p", "s", "Empresa A", 0.1)])
+    claude = FakeClaude(resposta=_resposta(True, "alta"), query="NÃO DEVERIA SER USADA")
+
+    insp = await inspecionar(_ticket(), settings=off, rag_service=rag, claude=claude)
+
+    assert claude.reformulacoes == []  # nem chamou o modelo
+    assert rag.queries == [insp.problema]  # união colapsa: só o texto limpo
+    assert insp.query == insp.problema
+
+
+async def test_reformulacao_que_falha_cai_no_texto_limpo_e_nao_derruba_o_chamado(settings):
+    rag = FakeRag([Similar(1, "p", "s", "Empresa A", 0.1)])
+    claude = FakeClaude(resposta=_resposta(True, "alta"), erro_query=RuntimeError("api caiu"))
+
+    insp = await inspecionar(_ticket(), settings=settings, rag_service=rag, claude=claude)
+
+    assert rag.queries == [insp.problema]  # best-effort: comportamento pré-ADR-024
+    assert insp.query == insp.problema
+    assert insp.decisao is Decisao.RESOLVIDO  # o chamado seguiu normalmente

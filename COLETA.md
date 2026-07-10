@@ -57,6 +57,13 @@ seguintes: (1) **reformulação de query** antes do RAG (fecha o gap de ruído, 
 (2) conteúdo mais **específico** (variantes reais) ou reavaliar o ROI do portão neste fluxo.
 Portão **não construído** — decisão pendente à luz desta medição.
 
+> **Update (ADR-024): lever (1) construída e medida.** A reformulação foi implementada por
+> **união** (busca o texto limpo + a intenção reformulada, une por menor distância). Em 25
+> chamados reais: documentação de 0,5046 → **0,4686**, top-1 = doc de 11/25 → **20/25**, com os
+> chamados anteriores preservados (0,3493 → 0,3414) e **flips ganhos 2 / perdidos 0**. Ganho
+> modesto, como previsto, mas sem custo colateral. Detalhes e a prova antes/depois: **ADR-024**
+> + `scripts/avaliar_reformulacao.py`.
+
 ## Fonte
 
 - **`centraldeatendimento.totvs.com`** (Central de Atendimento técnica, plataforma **Zendesk**).

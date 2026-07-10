@@ -150,7 +150,8 @@ class Inspecao:
     Não contém nem toca Freshdesk/WhatsApp.
     """
 
-    problema: str  # texto limpo que virou a query
+    problema: str  # texto limpo do chamado (é ele que vai ao Claude gerar a resposta)
+    query: str  # o que REALMENTE foi buscado no pgvector (reformulado, ou == problema)
     pares: list[Similar]  # recuperação local (fonte/título/distância p/ auditoria)
     resposta: RespostaIA  # resposta FINAL (a da web, se acionada)
     decisao: Decisao
@@ -158,6 +159,24 @@ class Inspecao:
     pares_web: list[Similar] = field(default_factory=list)  # trechos web (se acionada)
     nota: str = ""  # nota interna que SERIA criada no Freshdesk
     whatsapp: str = ""  # mensagem que SERIA enviada no WhatsApp
+
+
+async def _query_de_busca(
+    problema: str, *, claude: ClaudeClient, settings: Settings
+) -> str:
+    """Query do RAG: a intenção reformulada (ADR-024) ou o texto limpo. BEST-EFFORT.
+
+    Falha na reformulação NUNCA derruba o chamado — cai no `problema`, que é exatamente o
+    comportamento anterior à ADR-024. Reformular só afeta O QUE É BUSCADO; o `problema`
+    íntegro é que segue para o `gerar_resposta`.
+    """
+    if not settings.reformular_query_ativa:
+        return problema
+    try:
+        return await claude.reformular_query(problema)
+    except Exception:
+        logger.exception("Reformulação de query falhou — usando o texto limpo do chamado.")
+        return problema
 
 
 async def inspecionar(
@@ -168,14 +187,21 @@ async def inspecionar(
     claude: ClaudeClient,
     busca_web: BuscaWebClient | None = None,
 ) -> Inspecao:
-    """MIOLO do pipeline: RAG → Claude → decisão → (busca web). SEM efeitos colaterais.
+    """MIOLO do pipeline: reformular query → RAG → Claude → decisão → (busca web).
 
-    NÃO recebe Freshdesk nem WhatsApp — por construção, não há como escrever nota nem
-    enviar mensagem por este caminho. É a MESMA lógica que o `processar()` usa (a interface
-    de teste chama exatamente isto), então o que se vê na tela é o que aconteceria.
+    SEM efeitos colaterais. NÃO recebe Freshdesk nem WhatsApp — por construção, não há como
+    escrever nota nem enviar mensagem por este caminho. É a MESMA lógica que o `processar()`
+    usa (a interface de teste chama exatamente isto), então o que se vê na tela é o que
+    aconteceria.
     """
     problema = _montar_problema(ticket)
-    pares = await rag_service.buscar(problema)
+    query = await _query_de_busca(problema, claude=claude, settings=settings)
+    # UNIÃO (ADR-024): busca com o texto limpo E a intenção reformulada, unindo por menor
+    # distância. A documentação responde melhor à intenção; o chamado anterior, ao texto
+    # cru. Se não houve reformulação (flag off/falha/degenerada), query==problema e a união
+    # colapsa numa busca só. O Claude gera a resposta a partir do PROBLEMA íntegro, não da
+    # query — a query é uma compressão com perda, boa para buscar e ruim para responder.
+    pares = await rag_service.buscar_uniao([problema, query])
     resposta = await claude.gerar_resposta(problema, pares)
     resultado = ResultadoChamado(
         ticket_id=ticket.id, empresa=ticket.empresa, resposta=resposta
@@ -199,6 +225,7 @@ async def inspecionar(
 
     return Inspecao(
         problema=problema,
+        query=query,
         pares=pares,
         resposta=resposta,
         decisao=decisao,

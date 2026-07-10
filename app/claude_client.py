@@ -28,8 +28,9 @@ from tenacity import (
 )
 
 from app.config import Settings
-from app.models import RespostaIA
+from app.models import QueryReformulada, RespostaIA
 from app.rag import Similar
+from app.texto import extrair_codigos_tecnicos
 
 _TOOL_NAME = "responder_chamado"
 # 2048 (era 1024): respostas ancoradas — sobretudo as da busca web, que resumem
@@ -91,6 +92,38 @@ PEDIDO OPERACIONAL:
 Registre sua resposta chamando a ferramenta responder_chamado."""
 
 
+# --- reformulação de query (ADR-024) ---------------------------------------
+
+_TOOL_QUERY = "registrar_query"
+_MAX_TOKENS_QUERY = 300  # uma frase; o teto é folga, não orçamento
+# Teto de entrada: o excedente de um e-mail longo não muda a INTENÇÃO, só custa tokens.
+_MAX_CHARS_QUERY = 4000
+# Reformulação degenerada (modelo devolveu vazio/token solto) → melhor usar o texto original.
+_MIN_CHARS_QUERY = 10
+
+SYSTEM_PROMPT_QUERY = """Você prepara a CONSULTA de busca de um sistema de suporte ao ERP
+TOTVS Protheus. Recebe o texto de um chamado e devolve a INTENÇÃO de busca dele.
+
+Essa consulta será usada para buscar, por similaridade semântica, em uma base de
+documentação oficial TOTVS e de chamados já resolvidos. Ela NUNCA é mostrada ao cliente.
+
+REGRAS:
+1. NÃO responda o chamado. NÃO explique. Apenas reescreva a intenção como uma consulta.
+2. Escreva como a DOCUMENTAÇÃO se expressa: impessoal e direto (ex.: "Como cadastrar um
+   produto no Protheus", "Erro SCC19070 ao gerar SPED fiscal"). Uma frase, no máximo 25
+   palavras.
+3. PRESERVE LITERALMENTE todo código técnico do chamado: parâmetros (MV_*), campos
+   (B1_COD), rotinas (MATA010), módulos (SIGAFIN), tabelas (SX5) e códigos de erro
+   (SCC19070). Eles são o sinal mais forte da busca.
+4. NUNCA invente código, parâmetro, rotina ou tabela que não esteja no chamado.
+5. DESCARTE o que não ajuda a busca: nomes de pessoas e de empresas, saudações,
+   agradecimentos, assinaturas, datas, números de chamado, telefones, e-mails e urgência.
+6. Preserve o vocabulário do domínio (nomes de rotina, de módulo e do erro). Não traduza
+   nem "melhore" termos do Protheus.
+
+Registre a consulta chamando a ferramenta registrar_query."""
+
+
 _retry_claude = retry(
     reraise=True,
     stop=stop_after_attempt(4),
@@ -108,6 +141,28 @@ def _tool_responder_chamado() -> dict:
         "description": "Registra a resposta estruturada ao chamado de suporte TOTVS Protheus.",
         "input_schema": RespostaIA.model_json_schema(),
     }
+
+
+def _tool_registrar_query() -> dict:
+    """Tool cujo input_schema é o schema de QueryReformulada (saída estruturada forçada)."""
+    return {
+        "name": _TOOL_QUERY,
+        "description": "Registra a consulta de busca derivada do chamado.",
+        "input_schema": QueryReformulada.model_json_schema(),
+    }
+
+
+def _preservar_codigos(problema: str, query: str) -> str:
+    """Reinjeta na query os códigos técnicos que o modelo descartou ao reformular.
+
+    Ponto ÚNICO da garantia (ADR-024): um `MV_ATFMOED` ou `SCC19070` perdido na reescrita
+    apaga o sinal mais discriminante da busca vetorial. Em vez de confiar na regra 3 do
+    prompt, conferimos em CÓDIGO e reanexamos o que faltar. Comparação em caixa alta porque
+    o extrator só reconhece maiúsculas.
+    """
+    query_maiuscula = query.upper()
+    faltando = [c for c in extrair_codigos_tecnicos(problema) if c not in query_maiuscula]
+    return f"{query} {' '.join(faltando)}" if faltando else query
 
 
 def _rotulo_fonte(par: Similar) -> str:
@@ -169,6 +224,7 @@ class ClaudeClient:
         )
         self._model = settings.claude_model
         self._tool = _tool_responder_chamado()
+        self._tool_query = _tool_registrar_query()
         # Bloco estático de instruções com prompt caching; o contexto variável fica no
         # user message, FORA do cache (ver ADR-007).
         self._system = [
@@ -190,6 +246,25 @@ class ClaudeClient:
         message = await self._criar(conteudo)
         return _acolhimento_padrao_se_escala(self._extrair(message))
 
+    async def reformular_query(self, problema: str) -> str:
+        """Reescreve o chamado como INTENÇÃO de busca, para o embedding do RAG (ADR-024).
+
+        A saída alimenta SOMENTE a busca vetorial: nunca vira contexto do `gerar_resposta`
+        nem chega ao cliente. Por isso uma reformulação ruim degrada a recuperação, mas é
+        incapaz de alucinar — a regra de ouro segue ancorada nos pares recuperados.
+
+        Devolve o `problema` original quando ele não tem substância ou quando o modelo
+        devolve algo degenerado. Erros de API sobem (o pipeline trata como best-effort).
+        """
+        texto = problema.strip()
+        if len(texto) < _MIN_CHARS_QUERY:
+            return problema
+        message = await self._criar_query(texto[:_MAX_CHARS_QUERY])
+        query = self._extrair_query(message).query.strip()
+        if len(query) < _MIN_CHARS_QUERY:
+            return problema  # reformulação degenerada — o texto original é mais seguro
+        return _preservar_codigos(problema, query)
+
     @_retry_claude
     async def _criar(self, conteudo: str):
         return await self._client.messages.create(
@@ -202,9 +277,28 @@ class ClaudeClient:
             messages=[{"role": "user", "content": conteudo}],
         )
 
+    @_retry_claude
+    async def _criar_query(self, problema: str):
+        return await self._client.messages.create(
+            model=self._model,
+            max_tokens=_MAX_TOKENS_QUERY,
+            temperature=0,
+            system=SYSTEM_PROMPT_QUERY,
+            tools=[self._tool_query],
+            tool_choice={"type": "tool", "name": _TOOL_QUERY},
+            messages=[{"role": "user", "content": f"Chamado:\n{problema}"}],
+        )
+
     @staticmethod
     def _extrair(message) -> RespostaIA:
         for bloco in message.content:
             if getattr(bloco, "type", None) == "tool_use" and bloco.name == _TOOL_NAME:
                 return RespostaIA.model_validate(bloco.input)
         raise ValueError("O Claude não retornou a ferramenta responder_chamado.")
+
+    @staticmethod
+    def _extrair_query(message) -> QueryReformulada:
+        for bloco in message.content:
+            if getattr(bloco, "type", None) == "tool_use" and bloco.name == _TOOL_QUERY:
+                return QueryReformulada.model_validate(bloco.input)
+        raise ValueError("O Claude não retornou a ferramenta registrar_query.")

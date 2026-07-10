@@ -6,6 +6,7 @@ Cliente Anthropic FALSO injetado — nenhuma chamada real paga.
 from app.claude_client import (
     RESPOSTA_ESCALAR_PADRAO,
     SYSTEM_PROMPT,
+    SYSTEM_PROMPT_QUERY,
     ClaudeClient,
     _resposta_sem_contexto,
 )
@@ -224,3 +225,89 @@ async def test_parseia_pedido_operacional(settings):
     assert resposta.encontrou_solucao is False
     # Pedido operacional também escala → resposta ao cliente é a saudação-padrão (ADR-022).
     assert resposta.resposta_cliente == RESPOSTA_ESCALAR_PADRAO
+
+
+# --- reformulação de query (ADR-024) ---------------------------------------
+# Nada aqui vai à rede: o cliente Anthropic é falso. A query alimenta só o embedding
+# da busca — nunca o contexto do gerar_resposta nem o texto ao cliente.
+
+
+class _FakeMessagesQuery:
+    """Devolve `registrar_query` com a query canned; registra os kwargs recebidos."""
+
+    def __init__(self, query: str):
+        self._query = query
+        self.chamadas: list[dict] = []
+
+    async def create(self, **kwargs):
+        self.chamadas.append(kwargs)
+        return _Msg(
+            [
+                _Bloco("text", None, None),  # bloco de texto antes deve ser ignorado
+                _Bloco("tool_use", name="registrar_query", input={"query": self._query}),
+            ]
+        )
+
+
+class FakeAnthropicQuery:
+    def __init__(self, query: str):
+        self.messages = _FakeMessagesQuery(query)
+
+
+async def test_reformular_query_devolve_a_intencao_do_modelo(settings):
+    fake = FakeAnthropicQuery("Como cadastrar um produto no Protheus")
+    cliente = ClaudeClient(settings, client=fake)
+
+    query = await cliente.reformular_query(
+        "Olá, bom dia! Preciso saber como faço pra cadastrar produto novo. Att, João"
+    )
+
+    assert query == "Como cadastrar um produto no Protheus"
+    kwargs = fake.messages.chamadas[0]
+    assert kwargs["tool_choice"] == {"type": "tool", "name": "registrar_query"}
+    assert kwargs["temperature"] == 0
+
+
+async def test_reformular_query_reinjeta_codigo_que_o_modelo_descartou(settings):
+    # O modelo "limpou" o texto e perdeu o erro e o parâmetro — o sinal mais forte da busca.
+    fake = FakeAnthropicQuery("Erro ao lançar nota fiscal de ativo fixo")
+    cliente = ClaudeClient(settings, client=fake)
+
+    query = await cliente.reformular_query(
+        "Ao lançar a NF dá o erro SCC19070; já conferi o parâmetro MV_ATFMOED na SB1."
+    )
+
+    assert query.startswith("Erro ao lançar nota fiscal de ativo fixo")
+    for codigo in ("SCC19070", "MV_ATFMOED", "SB1"):
+        assert codigo in query
+
+
+async def test_reformular_query_nao_duplica_codigo_ja_presente(settings):
+    fake = FakeAnthropicQuery("Erro SCC19070 ao gerar SPED")
+    cliente = ClaudeClient(settings, client=fake)
+
+    query = await cliente.reformular_query("Dá erro SCC19070 ao gerar o SPED fiscal aqui.")
+
+    assert query.count("SCC19070") == 1
+
+
+async def test_reformular_query_degenerada_cai_no_problema_original(settings):
+    fake = FakeAnthropicQuery("  ok  ")  # curta demais para ser uma intenção de busca
+    cliente = ClaudeClient(settings, client=fake)
+    problema = "Não consigo emitir a nota fiscal de saída no faturamento."
+
+    assert await cliente.reformular_query(problema) == problema
+
+
+async def test_reformular_query_texto_curto_nao_gasta_chamada(settings):
+    fake = FakeAnthropicQuery("qualquer coisa")
+    cliente = ClaudeClient(settings, client=fake)
+
+    assert await cliente.reformular_query("erro") == "erro"
+    assert fake.messages.chamadas == []  # nem chegou a chamar a API
+
+
+async def test_prompt_de_query_proibe_responder_e_manda_preservar_codigos():
+    assert "NÃO responda o chamado" in SYSTEM_PROMPT_QUERY
+    assert "PRESERVE LITERALMENTE" in SYSTEM_PROMPT_QUERY
+    assert "NUNCA invente" in SYSTEM_PROMPT_QUERY

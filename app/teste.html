@@ -89,6 +89,14 @@ async function processar(){
       + '<div class="sec"><h3>Decisão</h3>'
       +   '<span class="badge '+cls+'">'+esc(d.decisao.toUpperCase())+'</span> '
       +   '<span class="muted">'+meta+'</span> '+web+' '+oper+'</div>'
+      + '<div class="sec"><h3>Query enviada ao RAG</h3>'
+      +   (d.query === d.problema
+            ? '<p class="muted">(sem reformulação — buscou o texto limpo do chamado)</p>'
+            : '<pre>'+esc(d.query)+'</pre>'
+              +'<p class="muted">Reformulada (ADR-024). O Claude responde a partir do '
+              +'texto íntegro abaixo, não desta query.</p>'
+              +'<pre>'+esc(d.problema)+'</pre>')
+      + '</div>'
       + '<div class="sec"><h3>Rascunho de resposta (iria ao cliente)</h3><pre>'
       +   esc(d.resposta_cliente)+'</pre></div>'
       + '<div class="sec"><h3>Nota interna (seria criada no Freshdesk)</h3><pre>'

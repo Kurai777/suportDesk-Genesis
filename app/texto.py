@@ -1,9 +1,12 @@
-"""Limpeza de texto de e-mails de chamados — função pura e testável (ADR-011/013).
+"""Limpeza de texto de e-mails de chamados — funções puras e testáveis (ADR-011/013).
 
 Remove ruído de e-mail (saudações e cordialidades, despedidas + assinatura, blocos
 citados, cabeçalhos de encaminhamento, `[cid:...]`, caracteres invisíveis) e normaliza
 espaços, PRESERVANDO o corpo técnico. Trata tanto e-mails multi-linha quanto os de uma
 linha só ("Hi Fulano, Bom dia, tudo bem? <conteúdo> Att,"), comuns no Freshdesk.
+
+Expõe também `extrair_codigos_tecnicos`, usado pela reformulação de query (ADR-024) para
+garantir, EM CÓDIGO, que os identificadores TOTVS do chamado sobrevivam à reformulação.
 """
 
 from __future__ import annotations
@@ -87,3 +90,34 @@ def limpar_texto(texto: str) -> str:
             continue
         uteis.append(_ESPACOS.sub(" ", s))
     return _remover_cortesias_inline("\n".join(uteis).strip())
+
+
+# --- identificadores técnicos TOTVS (ADR-024) ------------------------------
+
+# Só MAIÚSCULAS: é como o Protheus grafa esses identificadores, e exigir caixa alta evita
+# casar palavra comum. Cada alternativa exige DÍGITO ou prefixo fixo (MV_/SIGA), então
+# assunto em CAIXA ALTA sem código ("RELATÓRIO SMART VIEW NÃO ABRE") não gera falso positivo.
+_CODIGO_TECNICO = re.compile(
+    r"\b(?:"
+    r"MV_[A-Z0-9_]{2,}"  # parâmetro: MV_ATFMOED
+    r"|[A-Z]\d_[A-Z0-9_]{2,}"  # campo: B1_COD, C7_NUM
+    r"|SIGA[A-Z]{3}"  # módulo: SIGAFIN, SIGAEST
+    r"|[A-Z]{2,4}\d{3,6}"  # rotina/erro: MATA010, FATA900, SCC19070
+    r"|S[A-Z]\d"  # tabela: SX5, SB1, SC7
+    r")\b"
+)
+
+
+def extrair_codigos_tecnicos(texto: str) -> list[str]:
+    """Identificadores TOTVS do texto (parâmetro, campo, módulo, rotina, erro, tabela).
+
+    Ordem de aparição, sem repetição. São o sinal MAIS FORTE da busca vetorial: a
+    reformulação de query (ADR-024) usa esta lista para reinjetar, em código, qualquer
+    código que o modelo tenha descartado ao reescrever a intenção do chamado.
+    """
+    if not texto:
+        return []
+    vistos: dict[str, None] = {}  # dict preserva ordem de inserção
+    for m in _CODIGO_TECNICO.finditer(texto):
+        vistos.setdefault(m.group(0), None)
+    return list(vistos)
