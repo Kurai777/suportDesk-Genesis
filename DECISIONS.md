@@ -664,3 +664,53 @@ Um módulo só é considerado PRONTO quando:
   preservado para a busca); ilegível (`""`) → não concatena, segue sem ela; sem anexo → visão nem é
   chamada, texto inalterado; base64 inválido / falha na transcrição → ignorado best-effort; flag off
   / sem VisaoClient → não transcreve; respeita o teto `_MAX_IMAGENS`. **170 passando, ruff limpo.**
+
+## ADR-026 — (PROPOSTA, FASE 2 — NÃO IMPLEMENTAR) Busca ao vivo no Portal do Cliente TOTVS
+
+> **Status: PROPOSTA. Não implementar agora.** Registro de arquitetura para decisão futura. O
+> foco atual é fechar a leitura de imagens (ADR-025) antes de produção. Esta ADR não altera código.
+
+- **Contexto/motivação:** a base local (chamados resolvidos + documentação coletada da Central de
+  Atendimento) é finita e envelhece. Quando ela não resolve, hoje o chamado ESCALA para um humano.
+  A busca web restrita (ADR-015) cobre só o conteúdo PÚBLICO. Muito do conteúdo técnico útil da TOTVS
+  vive atrás de LOGIN no Portal do Cliente. A proposta é, como ÚLTIMO recurso, consultar o portal
+  logado por palavra-chave e — se o cliente confirmar que resolveu — aprender com o par.
+- **Fluxo proposto (ordem):**
+  1. **Base local primeiro** (comportamento atual): RAG união (ADR-024) sobre chamados + docs.
+  2. **Se não achar** (`encontrou_solucao=false` e não é pedido operacional): buscar no **Portal do
+     Cliente TOTVS logado**, por palavra-chave derivada da query reformulada (ADR-024).
+  3. **Responder** ancorado SÓ no que o portal retornou, com a regra de ouro (abaixo) e rótulo de
+     fonte "menos verificada" (revisão humana obrigatória, como na ADR-015).
+  4. **Ciclo de aprendizado:** se o cliente CONFIRMAR a resolução, ingerir o par
+     problema→solução no RAG (`fonte='portal_totvs'`), realimentando a base. Só ingere após
+     confirmação — nunca uma resposta não confirmada (evita envenenar a base).
+- **Encaixe na arquitetura atual:** espelharia a ADR-015 — um novo cliente fino
+  (`PortalTotvsClient`) atrás de flag (`BUSCA_PORTAL_ATIVA`, default false), acionado no mesmo ponto
+  do `inspecionar` onde hoje entra a busca web, DEPOIS dela. A ingestão reusaria `RagRepository.inserir`.
+  O gatilho de confirmação do cliente exigiria captar a resposta do chamado no Freshdesk (ex.:
+  `get_conversations`) — peça nova, a desenhar.
+- **PRÉ-REQUISITOS E RISCOS a resolver ANTES de qualquer implementação:**
+  - **(a) Segurança de credenciais de parceiro:** armazenar login/senha (ou token) do Portal do
+    Cliente num servidor é um ativo de alto valor. Exige, no mínimo: segredo em cofre gerenciado
+    (não em `.env` de app), rotação, escopo mínimo, e um plano de resposta a vazamento. Credencial de
+    PARCEIRO pode dar acesso a dados de MÚLTIPLOS clientes — o raio de dano é maior que o de uma API
+    key qualquer. **Bloqueante.**
+  - **(b) Termos de uso do portal logado:** validar COM A TOTVS que o acesso automatizado/scraping do
+    Portal do Cliente é permitido contratualmente. Diferente do conteúdo público (ADR-015): área
+    logada quase sempre tem cláusula de uso. Sem sinal verde explícito, não avançar. **Bloqueante,
+    não-técnico.**
+  - **(c) A regra de ouro anti-alucinação PERMANECE obrigatória:** fonte oficial REDUZ, mas NÃO
+    elimina, o risco de interpretação errada. Um artigo de VERSÃO diferente do Protheus do cliente,
+    ou um caso QUASE-igual (mesmo erro, causa distinta), pode gerar uma instrução errada num ERP em
+    produção — o dano real que o CLAUDE.md existe para evitar. `encontrou_solucao` continua só quando
+    a solução está no contexto recuperado; Fase 1 copiloto (revisão humana) continua obrigatória
+    também para esta fonte.
+  - **(d) Latência da busca ao vivo:** login + busca + leitura no portal adiciona segundos ao já
+    encadeado (visão → reformulação → RAG → Claude). Como só dispara quando a base local falhou (cauda
+    dos chamados), o custo médio é diluído — mas precisa de teto de tempo (timeout) e degradação
+    graciosa (falhou/estourou → ESCALA, nunca trava o chamado), no mesmo espírito best-effort da
+    ADR-015/023.
+- **Quando reavaliar:** **revisar após 2–4 semanas de produção**, com DADOS REAIS sobre a frequência
+  com que a base local falha (quantos % dos chamados caem em ESCALAR por falta de contexto). Se a
+  base local resolve a grande maioria, o ROI desta fase — frente aos riscos (a)/(b) — pode não se
+  justificar. A medição decide; hoje não há número para sustentar o esforço.
