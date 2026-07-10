@@ -11,7 +11,7 @@ import pytest
 import respx
 
 from app.config import Settings
-from app.freshdesk import FreshdeskClient
+from app.freshdesk import FreshdeskClient, _normalizar_host
 from app.models import EMPRESA_DESCONHECIDA, TicketFreshdesk
 
 BASE = "https://genesis.freshdesk.com/api/v2"
@@ -127,7 +127,55 @@ async def test_atribuir_envia_responder_id():
     assert enviado == {"responder_id": 77}
 
 
+# --- baixar_anexo (leitura de imagens, ADR-023) ----------------------------
+
+
+@respx.mock
+async def test_baixar_anexo_busca_url_pre_assinada_sem_auth():
+    url = "https://s3.amazonaws.com/freshdesk/att/1/print.png?sig=abc"
+    route = respx.get(url).mock(return_value=httpx.Response(200, content=b"\x89PNG-bytes"))
+
+    async with FreshdeskClient(_settings()) as fd:
+        dados = await fd.baixar_anexo(url)
+
+    assert dados == b"\x89PNG-bytes"
+    assert route.called
+    # URL pré-assinada (S3): buscada SEM a auth Basic do Freshdesk.
+    assert "authorization" not in route.calls.last.request.headers
+
+
+def test_from_freshdesk_parseia_anexos_e_filtra_imagens():
+    ticket = TicketFreshdesk.from_freshdesk(
+        {
+            **TICKET_BASE,
+            "company": {"name": "Y"},
+            "attachments": [
+                {"id": 1, "name": "print.png", "content_type": "image/png",
+                 "attachment_url": "https://s3/att/1"},
+                {"id": 2, "name": "manual.pdf", "content_type": "application/pdf",
+                 "attachment_url": "https://s3/att/2"},
+            ],
+        }
+    )
+    assert len(ticket.attachments) == 2
+    assert [a.id for a in ticket.imagens] == [1]  # só a imagem
+
+
 # --- mapeamento de prioridade (sem HTTP) -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "valor,esperado",
+    [
+        ("genesis", "genesis.freshdesk.com"),
+        ("genesis.freshdesk.com", "genesis.freshdesk.com"),
+        ("https://genesis.freshdesk.com", "genesis.freshdesk.com"),
+        ("https://genesis-consulting.freshdesk.com/", "genesis-consulting.freshdesk.com"),
+        ("  genesis  ", "genesis.freshdesk.com"),
+    ],
+)
+def test_normaliza_host_freshdesk(valor, esperado):
+    assert _normalizar_host(valor) == esperado
 
 
 @pytest.mark.parametrize(

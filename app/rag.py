@@ -55,13 +55,15 @@ _retry_voyage = retry(
 
 @dataclass(slots=True)
 class Similar:
-    """Um par problema/solução recuperado da base, com a distância de similaridade."""
+    """Um trecho recuperado da base (chamado ou documentação), com a distância."""
 
     ticket_id: int | None
     problema: str
     solucao: str
-    empresa: str
+    empresa: str | None
     distancia: float
+    fonte: str = "ticket"
+    titulo: str | None = None
 
 
 class VoyageClient:
@@ -104,15 +106,20 @@ class RagRepository:
         self,
         *,
         ticket_id: int | None,
-        empresa: str,
+        empresa: str | None,
         problema: str,
         solucao: str,
         embedding: list[float],
+        fonte: str = "ticket",
+        titulo: str | None = None,
     ) -> None:
         await self._conn.execute(
             """
-            INSERT INTO conhecimento (ticket_id, empresa, problema, solucao, embedding)
-            VALUES (%(ticket_id)s, %(empresa)s, %(problema)s, %(solucao)s, %(embedding)s)
+            INSERT INTO conhecimento
+                (ticket_id, empresa, problema, solucao, embedding, fonte, titulo)
+            VALUES
+                (%(ticket_id)s, %(empresa)s, %(problema)s, %(solucao)s,
+                 %(embedding)s, %(fonte)s, %(titulo)s)
             """,
             {
                 "ticket_id": ticket_id,
@@ -120,15 +127,42 @@ class RagRepository:
                 "problema": problema,
                 "solucao": solucao,
                 "embedding": Vector(embedding),
+                "fonte": fonte,
+                "titulo": titulo,
             },
         )
+
+    async def ticket_ids_ingeridos(self) -> set[int]:
+        """Todos os ticket_id já presentes como chamado (idempotência, ADR-016).
+
+        A tabela é a ÚNICA fonte da verdade — à prova de recriação do banco (sem
+        depender de checkpoints em arquivo).
+        """
+        cur = await self._conn.execute(
+            "SELECT ticket_id FROM conhecimento "
+            "WHERE fonte = 'ticket' AND ticket_id IS NOT NULL"
+        )
+        return {linha[0] for linha in await cur.fetchall()}
+
+    async def doc_ja_ingerido(self, titulo: str | None, problema: str) -> bool:
+        """Se um trecho de documentação com este (titulo, problema) já existe (ADR-016).
+
+        (titulo, problema) é a chave estável do trecho — ambos ficam gravados na linha,
+        então a verificação sobrevive à recriação do banco.
+        """
+        cur = await self._conn.execute(
+            "SELECT 1 FROM conhecimento WHERE fonte = 'documentacao' "
+            "AND titulo IS NOT DISTINCT FROM %(t)s AND problema = %(p)s LIMIT 1",
+            {"t": titulo, "p": problema},
+        )
+        return await cur.fetchone() is not None
 
     async def buscar_similares(self, embedding: list[float], k: int) -> list[Similar]:
         """Top-k por distância de cosseno (`<=>`, casa com o índice HNSW)."""
         async with self._conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT ticket_id, problema, solucao, empresa,
+                SELECT ticket_id, problema, solucao, empresa, fonte, titulo,
                        embedding <=> %(vec)s AS distancia
                 FROM conhecimento
                 ORDER BY embedding <=> %(vec)s

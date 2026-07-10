@@ -15,6 +15,7 @@ RESPOSTA_VALIDA = {
     "confianca": "alta",
     "resumo_para_responsavel": "MV_ATFMOED apontava moeda 3 sem taxa do dia.",
     "urgencia": "alta",
+    "pedido_operacional": False,
 }
 
 
@@ -23,6 +24,13 @@ def test_resposta_ia_valida():
     assert r.encontrou_solucao is True
     assert r.confianca == "alta"
     assert r.urgencia == "alta"
+    assert r.pedido_operacional is False
+
+
+def test_resposta_ia_pedido_operacional_obrigatorio():
+    dados = {k: v for k, v in RESPOSTA_VALIDA.items() if k != "pedido_operacional"}
+    with pytest.raises(ValidationError):
+        RespostaIA(**dados)
 
 
 def test_resposta_ia_confianca_invalida():

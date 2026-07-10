@@ -45,15 +45,25 @@ def _esperar(retry_state: RetryCallState) -> float:
     return wait_exponential(multiplier=0.5, max=_ESPERA_MAX)(retry_state)
 
 
+def _normalizar_host(dominio: str) -> str:
+    """Aceita 'genesis', 'genesis.freshdesk.com' ou a URL completa (com https:// e /).
+
+    Tolera o erro comum de colar a URL inteira do Freshdesk no lugar do subdomínio.
+    """
+    host = dominio.strip().removeprefix("https://").removeprefix("http://")
+    host = host.split("/", 1)[0]  # descarta qualquer barra/caminho ao final
+    if "." not in host:
+        host = f"{host}.freshdesk.com"
+    return host
+
+
 class FreshdeskClient:
     """Acesso fino e assíncrono à API v2 do Freshdesk. Recebe `Settings` por injeção."""
 
     def __init__(
         self, settings: Settings, client: httpx.AsyncClient | None = None
     ) -> None:
-        dominio = settings.freshdesk_domain
-        host = dominio if "." in dominio else f"{dominio}.freshdesk.com"
-        self._base_url = f"https://{host}/api/v2"
+        self._base_url = f"https://{_normalizar_host(settings.freshdesk_domain)}/api/v2"
         self._auth = (settings.freshdesk_api_key, "X")  # Basic Auth: chave + senha "X"
         self._client = client or httpx.AsyncClient(timeout=15.0)
 
@@ -97,6 +107,22 @@ class FreshdeskClient:
             "GET", f"/tickets/{ticket_id}/conversations", params={"per_page": 100}
         )
         return resp.json()
+
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(_TENTATIVAS),
+        wait=_esperar,
+        retry=retry_if_exception(_e_retentavel),
+    )
+    async def baixar_anexo(self, url: str) -> bytes:
+        """Baixa o conteúdo de um anexo pela `attachment_url`.
+
+        A URL do Freshdesk é pré-assinada (S3) — buscada SEM a auth Basic do Freshdesk (mandar
+        a auth pode até invalidar a assinatura). Usada na leitura de imagens (ADR-023).
+        """
+        resp = await self._client.get(url)
+        resp.raise_for_status()
+        return resp.content
 
     async def close(self) -> None:
         await self._client.aclose()

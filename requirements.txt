@@ -21,3 +21,14 @@ voyageai==0.3.2
 # --- Banco vetorial (Postgres + pgvector) ---
 psycopg[binary]==3.2.3
 pgvector==0.3.6
+
+# --- Busca web como último recurso (ADR-015; aprovada pelo usuário) ---
+# ddgs: metabuscador (sucessor do duckduckgo-search). trafilatura: extrai o texto
+# principal do HTML das páginas oficiais TOTVS.
+ddgs==9.14.4
+trafilatura==2.1.0
+
+# --- Coletor da Central de Atendimento (ADR-017) ---
+# lxml: parse/limpeza do HTML dos artigos Zendesk (já vem via trafilatura; fixado por
+# ser importado diretamente em scripts/coletar_central.py).
+lxml==6.1.1

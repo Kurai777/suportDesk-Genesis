@@ -65,6 +65,15 @@ class RespostaIA(BaseModel):
             "(complementar à prioridade oficial)."
         ),
     )
+    pedido_operacional: bool = Field(
+        ...,
+        description=(
+            "true SÓ se o chamado é um PEDIDO OPERACIONAL — uma tarefa a ser EXECUTADA por "
+            "uma pessoa (cadastro, liberação, ajuste manual; ex.: incluir cadastro do grupo "
+            "tributário na SX5), não uma dúvida com resposta na base. Ajusta a saudação ao "
+            "cliente e sinaliza ao time que há execução pendente."
+        ),
+    )
     # `empresa` NÃO entra aqui: é um fato do chamado (TicketFreshdesk.empresa), não algo
     # que o modelo deva gerar — evita o Claude "pegar" a empresa de um vizinho recuperado.
     # Ela é acoplada depois em `ResultadoChamado`, montado pelo pipeline.
@@ -83,6 +92,50 @@ class ResultadoChamado(BaseModel):
 
 
 # --- Entrada: webhook ------------------------------------------------------
+
+
+class TesteRequest(BaseModel):
+    """Entrada da interface de teste (ADR-019): texto colado + empresa opcional.
+
+    Como o texto vem colado (não do Freshdesk), a `empresa` é informada à mão para
+    permitir auditar isolamento de dados por empresa na tela.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    texto: str = Field(..., description="Texto do chamado a inspecionar.")
+    empresa: str | None = Field(None, description="Empresa do chamado (opcional).")
+
+
+class ParInspecao(BaseModel):
+    """Um item recuperado, exposto na tela de teste para auditoria de fonte/isolamento."""
+
+    fonte: str
+    titulo: str | None = None
+    ticket_id: int | None = None
+    empresa: str | None = None
+    distancia: float
+    problema: str
+    solucao: str
+
+
+class TesteResposta(BaseModel):
+    """Saída da interface de teste: tudo que o pipeline PRODUZIRIA, sem efeito real."""
+
+    empresa: str
+    problema: str
+    decisao: str  # "resolvido" | "escalar"
+    encontrou_solucao: bool
+    confianca: str
+    pedido_operacional: bool  # tarefa a executar por uma pessoa (ADR-020)
+    resposta_cliente: str  # o rascunho que iria ao cliente
+    resumo_para_responsavel: str
+    urgencia: str
+    via_web: bool  # se a busca web foi acionada
+    nota: str  # nota interna que SERIA criada no Freshdesk
+    whatsapp: str  # mensagem que SERIA enviada no WhatsApp
+    pares: list[ParInspecao]  # recuperação local
+    pares_web: list[ParInspecao]  # trechos da web (se acionada)
 
 
 class WebhookFreshdesk(BaseModel):
@@ -111,6 +164,22 @@ class Requester(BaseModel):
     email: str | None = None
 
 
+class Anexo(BaseModel):
+    """Anexo de um chamado (subset dos campos do Freshdesk). Usado p/ leitura de imagens."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str = ""
+    content_type: str = ""
+    attachment_url: str = ""  # URL pré-assinada (S3) — baixada SEM auth do Freshdesk
+    size: int = 0
+
+    @property
+    def eh_imagem(self) -> bool:
+        return self.content_type.lower().startswith("image/")
+
+
 class TicketFreshdesk(BaseModel):
     """Chamado normalizado a partir de GET /tickets/{id}?include=requester,company,stats."""
 
@@ -124,6 +193,12 @@ class TicketFreshdesk(BaseModel):
     requester: Requester
     empresa: str
     responder_id: int | None = None
+    attachments: list[Anexo] = Field(default_factory=list)
+
+    @property
+    def imagens(self) -> list[Anexo]:
+        """Anexos que são imagens (prints de erro/logs) — candidatos à transcrição (ADR-023)."""
+        return [a for a in self.attachments if a.eh_imagem]
 
     @classmethod
     def from_freshdesk(cls, payload: dict[str, Any]) -> "TicketFreshdesk":
@@ -142,4 +217,5 @@ class TicketFreshdesk(BaseModel):
             ),
             empresa=company.get("name") or EMPRESA_DESCONHECIDA,
             responder_id=payload.get("responder_id"),
+            attachments=[Anexo.model_validate(a) for a in (payload.get("attachments") or [])],
         )

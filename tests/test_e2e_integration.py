@@ -55,6 +55,7 @@ class FakeClaudeE2E:
                 confianca="alta",
                 resumo_para_responsavel=f"Baseado no caso #{par.ticket_id}.",
                 urgencia="alta",
+                pedido_operacional=False,
             )
         return RespostaIA(
             resposta_cliente="Encaminhado para análise manual.",
@@ -62,6 +63,7 @@ class FakeClaudeE2E:
             confianca="baixa",
             resumo_para_responsavel="Nenhum caso similar na base.",
             urgencia="media",
+            pedido_operacional=False,
         )
 
 
