@@ -30,9 +30,11 @@ _NIVEL_CONFIANCA = {"baixa": 0, "media": 1, "alta": 2}
 
 NOTA_FALLBACK = "⚠️ IA indisponível no momento — chamado encaminhado para análise manual."
 
-# Leitura de imagens (ADR-023): cabeçalho do bloco transcrito e teto de imagens por chamado.
-_CABECALHO_IMAGENS = "[Texto extraído de imagens anexadas ao chamado]"
-_MAX_IMAGENS = 4  # limita custo/latência por chamado (best-effort)
+# Leitura de anexos (ADR-023/035/037/039): cabeçalho do bloco e tetos por chamado (best-effort).
+_CABECALHO_IMAGENS = "[Texto extraído de anexos do chamado (imagens/PDF/logs)]"
+_MAX_IMAGENS = 4  # teto de imagens/PDFs transcritos por chamado (custo/latência)
+_MAX_ANEXOS_TEXTO = 2  # teto de anexos .txt/.log lidos por chamado
+_MAX_CHARS_TXT = 6000  # teto por anexo de texto (log pode ter centenas de KB — pega o começo)
 
 
 class Decisao(StrEnum):
@@ -406,7 +408,7 @@ async def _incorporar_imagens(
     fontes += [(_do_anexo, a, f"pdf {a.id}") for a in ticket.pdfs]  # PDFs anexos (ADR-037)
     fontes += [(_do_inline, u, "inline") for u in ticket.imagens_inline]
     fontes = fontes[:_MAX_IMAGENS]
-    if not fontes:
+    if not fontes and not ticket.anexos_texto:  # nada para ler (imagem/PDF/inline/texto)
         return ticket
 
     trechos: list[str] = []
@@ -419,6 +421,18 @@ async def _incorporar_imagens(
             continue
         if texto.strip():
             trechos.append(texto.strip())
+
+    # Anexos de TEXTO (.txt/.log — ex.: log de erro) — lidos DIRETO, sem Claude (ADR-039).
+    # Log pode ter centenas de KB: pega só o começo (onde o erro costuma estar) até o teto.
+    for anexo in ticket.anexos_texto[:_MAX_ANEXOS_TEXTO]:
+        try:
+            dados = await freshdesk.baixar_anexo(anexo.attachment_url)
+        except Exception:
+            logger.exception("Falha ao baixar anexo texto %s (ticket %s).", anexo.id, ticket.id)
+            continue
+        conteudo = dados.decode("utf-8", errors="replace").strip()[:_MAX_CHARS_TXT]
+        if conteudo:
+            trechos.append(f"[Anexo {anexo.name}]\n{conteudo}")
 
     if not trechos:
         return ticket

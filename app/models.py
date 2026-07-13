@@ -254,6 +254,12 @@ class Anexo(BaseModel):
     def eh_pdf(self) -> bool:
         return self.content_type.lower().split(";", 1)[0].strip() == "application/pdf"
 
+    @property
+    def eh_texto(self) -> bool:
+        """Anexo de texto puro (log de erro, .txt/.log) — lido direto, sem Claude (ADR-039)."""
+        ct = self.content_type.lower()
+        return ct.startswith("text/") or self.name.lower().endswith((".txt", ".log"))
+
 
 class TicketFreshdesk(BaseModel):
     """Chamado normalizado a partir de GET /tickets/{id}?include=requester,company,stats."""
@@ -282,6 +288,11 @@ class TicketFreshdesk(BaseModel):
     def pdfs(self) -> list[Anexo]:
         """Anexos PDF (logs de erro, comprovantes de NF) — também transcritos (ADR-037)."""
         return [a for a in self.attachments if a.eh_pdf]
+
+    @property
+    def anexos_texto(self) -> list[Anexo]:
+        """Anexos de texto (.txt/.log — logs de erro) — lidos direto na busca (ADR-039)."""
+        return [a for a in self.attachments if a.eh_texto]
 
     @classmethod
     def from_freshdesk(cls, payload: dict[str, Any]) -> "TicketFreshdesk":

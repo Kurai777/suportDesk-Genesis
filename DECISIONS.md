@@ -1008,3 +1008,28 @@ Um módulo só é considerado PRONTO quando:
   `terminaldeinformacao.com/advpl-pontos-de-entrada/` junto da Central oficial.
 - **Testes:** a query inclui os domínios da comunidade (blacktdn, userfunction) além dos oficiais.
   **205 passando, ruff limpo.**
+
+## ADR-039 — Ler anexos de TEXTO (.txt/.log — logs de erro)
+
+- **Achado (#4427 "Erro na contabilização"):** o cliente anexou `Erro.txt` (872 KB) com o log do
+  erro; a IA IGNOROU (lê imagem e PDF, não texto) e escalou dizendo "anexos parecem ser só
+  assinatura". O log tinha o erro exato (Error 2601, chave duplicada na SE2 — E2_FILIAL/PREFIXO/
+  NUM/...). Mesmo padrão da imagem inline (ADR-035): o sinal mais forte do problema, ignorado.
+- **Decisão:** `_incorporar_imagens` passa a ler anexos de texto (`Anexo.eh_texto`: content_type
+  `text/*` ou nome `.txt`/`.log`). Texto puro é lido DIRETO (sem Claude — não precisa de visão),
+  decodificado e concatenado à busca. Teto `_MAX_ANEXOS_TEXTO=2` e `_MAX_CHARS_TXT=6000` por anexo
+  (log pode ter centenas de KB; pega o começo, onde o erro costuma estar). Best-effort.
+- **Correção de guard:** o early-return `if not fontes` (imagens/PDFs) pulava o texto quando o
+  chamado só tinha `.txt`; passou a `if not fontes and not anexos_texto`.
+- **Validação ao vivo:** #4427 saiu de ESCALAR (ignorava o .txt) → RESOLVIDO: leu o log, a query
+  virou "Erro 2601 SE2010 chave duplicada MATA103...", achou o par a 0,29, resolveu com alta.
+- **Testes:** anexo `.txt` grande é lido (sem visão), o erro entra na busca, e é truncado no teto.
+  **206 passando, ruff limpo.**
+
+## ADR-040 — Incluir o LINK de download na resposta ao cliente
+
+- **Pedido:** quando a solução envolve o cliente BAIXAR/ACESSAR algo (ferramenta, patch, fonte de
+  relatório, artigo do Portal do Cliente), a IA deve mandar o LINK/caminho junto, não só descrever.
+- **Decisão:** uma linha no SYSTEM_PROMPT (seção resposta_cliente): se a solução envolve baixar/
+  acessar algo, INCLUA o link/caminho — mas SOMENTE se estiver no <contexto> (regra de ouro: não
+  inventar link). Aproveita que os trechos da busca web já trazem a URL no rodapé.

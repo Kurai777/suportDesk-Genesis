@@ -827,6 +827,29 @@ async def test_incorporar_imagens_concatena_transcricao(settings):
     assert "SCC19070 no MV_ATFMOED" in novo.description_text  # transcrição concatenada
 
 
+async def test_incorporar_imagens_le_anexo_txt(settings):
+    # ADR-039 (caso #4427): cliente anexa Erro.txt com o log; a IA lê o texto direto (sem Claude)
+    # e concatena à busca. Log grande é truncado no teto.
+    log = "THREAD ERROR SCC19070 na rotina CTBA100. " + ("x" * 20000)
+    fd = FakeFreshdesk(anexo_bytes=log.encode("utf-8"))
+    visao = FakeVisao(texto="")  # sem imagem/PDF; o .txt não passa pela visão
+    ticket = TicketFreshdesk(
+        id=101, subject="Erro na contabilização", description_text="Segue o erro em anexo.",
+        priority="baixa", status=2, requester=Requester(name="C"), empresa="E",
+        responder_id=None,
+        attachments=[Anexo(id=7, name="Erro.txt", content_type="text/plain",
+                           attachment_url="https://s3/erro.txt")],
+    )
+
+    novo = await _incorporar_imagens(ticket, freshdesk=fd, visao=visao, settings=settings)
+
+    assert "https://s3/erro.txt" in fd.baixados  # baixou o .txt
+    assert visao.chamadas == []  # .txt NÃO vai à visão (é texto puro)
+    assert "SCC19070 na rotina CTBA100" in novo.description_text  # o erro entrou na busca
+    assert "Erro.txt" in novo.description_text  # rótulo do anexo
+    assert len(novo.description_text) < 10000  # log grande foi truncado no teto
+
+
 async def test_incorporar_imagens_le_pdf_anexo(settings):
     # ADR-037: PDF anexado (log de erro, comprovante de NF) é transcrito e concatenado à busca.
     fd = FakeFreshdesk(anexo_bytes=b"%PDF-1.4 log")
