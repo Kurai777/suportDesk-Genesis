@@ -113,7 +113,8 @@ async function processar(){
       return;
     }
     const d = await resp.json();
-    const rotulo = {resolvido:'RESOLVIDO', alcada_admin:'ALÇADA ADMIN', escalar:'ESCALAR'}[d.decisao] || d.decisao.toUpperCase();
+    const rotEquipe = d.alcada_admin ? 'ALÇADA ADMIN' : 'EQUIPE (tarefa/ação)';
+    const rotulo = {resolvido:'RESOLVIDO', alcada_admin:rotEquipe, escalar:'ESCALAR'}[d.decisao] || d.decisao.toUpperCase();
     const cls = d.decisao;  // casa com as classes CSS resolvido/alcada_admin/escalar
     const web = d.via_web ? '<span class="badge web">via BUSCA WEB</span>' : '';
     const oper = d.pedido_operacional ? '<span class="badge web">🔧 PEDIDO OPERACIONAL</span>' : '';

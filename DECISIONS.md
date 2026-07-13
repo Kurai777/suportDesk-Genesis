@@ -887,3 +887,32 @@ Um módulo só é considerado PRONTO quando:
 - **Testes:** guardrail que escala `encontrou=true` → cliente recebe a saudação, texto do modelo não
   vaza; escalar/pedido-operacional → nota traz a saudação-padrão + verdade técnica. **198 passando,
   ruff limpo.**
+
+## ADR-033 — Via da EQUIPE ampliada: ação/coordenação e admin sempre à equipe
+
+- **Achados na classificação humana do lote (18 chamados):** 9 acertou / 9 errou. Dos "errou", só
+  **1 era perigoso** (#4453, RESOLVIDO): a IA **assumiu um compromisso** ("reservaremos horário
+  quinta 16/07... MRP agendado sexta 17/07") — coordenação/agendamento, não uma dúvida com resposta.
+  O guardrail de distância NÃO pegou (par a 0,20, ótimo): o problema é o TIPO de resposta, não a
+  recuperação. Os outros 8 "errou" eram ESCALAR (o cliente ficou seguro); motivos apontados pelo
+  usuário: cobertura da base, busca web desligada no lote, e **admin que escalava terse** deveria ir
+  à equipe com direção.
+- **Decisão 1 — a via da EQUIPE (Decisao.ALCADA_ADMIN) passa a valer para `alcada_admin OU
+  pedido_operacional`**, não só admin+algo. Regra: se a resolução exige AÇÃO DA EQUIPE (admin, ou
+  tarefa/coordenação) → equipe recebe a direção; senão, RESOLVER (cliente) ou ESCALAR. Admin com
+  match distante (ex.: #4448, 0,56) NÃO escala mais terse: a equipe recebe a direção que a IA tem —
+  o guardrail (ADR-030) protege o CLIENTE, não a equipe, que verifica.
+- **Decisão 2 — ação/coordenação nunca auto-resolve, e a IA não assume compromissos:** o
+  SYSTEM_PROMPT trata pedido de AÇÃO/COORDENAÇÃO (agendar, reservar, rodar rotina, providenciar) como
+  `pedido_operacional=true`, e PROÍBE prometer horário/data/prazo/ação na resposta_cliente. Efeito no
+  #4453: agora vai à equipe ("TAREFA / EXECUÇÃO DA EQUIPE") com a direção de agendamento; o cliente
+  recebe só o acolhimento — o compromisso indevido some.
+- **Mensagens por MOTIVO (`_motivo_equipe`):** a via da equipe rotula "ALÇADA ADMINISTRATIVA (tipo)"
+  quando admin, ou "TAREFA / EXECUÇÃO DA EQUIPE" quando operacional. Interface `/teste` idem no badge.
+- **Follow-up registrado (não implementado):** (a) cobertura da base — coletar mais conteúdo para os
+  ESCALAR que deveriam ter resposta; (b) re-medir o lote com a **busca web LIGADA** (vários ESCALAR
+  seriam resgatados nos domínios TOTVS).
+- **Validação ao vivo:** #4453 → EQUIPE (tarefa), sem compromisso ao cliente; #4448 (admin, 0,56) →
+  EQUIPE com direção, cliente só o acolhimento.
+- **Testes:** admin (mesmo distante) → EQUIPE; sem admin/tarefa e distante → ESCALAR;
+  pedido-operacional → EQUIPE e não busca web; rótulos por motivo. **199 passando, ruff limpo.**

@@ -279,9 +279,17 @@ def test_decidir_alcada_admin_pedido_operacional_vai_a_equipe():
     assert d is Decisao.ALCADA_ADMIN
 
 
-def test_decidir_alcada_admin_sem_solucao_nem_tarefa_escala():
-    # Alçada admin, sem solução confiável E sem ser tarefa -> ESCALAR comum (avisa a alçada).
+def test_decidir_admin_mesmo_com_match_distante_vai_a_equipe():
+    # ADR-033: admin vai à EQUIPE com a direção que a IA tiver, MESMO com match distante — o
+    # guardrail protege o cliente, não a equipe (que verifica). Não escala terse.
     resultado = _resultado(encontrou=True, confianca="alta", alcada_admin=True)
+    d = decidir(resultado, "alta", melhor_distancia=0.47, distancia_maxima=0.40)
+    assert d is Decisao.ALCADA_ADMIN
+
+
+def test_decidir_sem_admin_sem_tarefa_e_match_distante_escala():
+    # Sem alçada admin, sem tarefa e match distante -> ESCALAR comum (guardrail, ADR-030).
+    resultado = _resultado(encontrou=True, confianca="alta", alcada_admin=False)
     d = decidir(resultado, "alta", melhor_distancia=0.47, distancia_maxima=0.40)
     assert d is Decisao.ESCALAR
 
@@ -601,7 +609,7 @@ async def test_inspecionar_alcada_admin_encaminha_solucao_a_equipe(settings):
 
     assert insp.decisao is Decisao.ALCADA_ADMIN
     # Grupo/WhatsApp recebe a direção completa (o resumo), rotulada como alçada admin.
-    assert "ALÇADA ADMIN (usuário)" in insp.whatsapp
+    assert "ALÇADA ADMINISTRATIVA (usuário)" in insp.whatsapp
     assert "Criar usuário X copiando o perfil de Y" in insp.whatsapp
     # Nota interna marca a alçada e traz a direção; o cliente não recebe os passos.
     assert "ALÇADA ADMINISTRATIVA (usuário)" in insp.nota
@@ -626,15 +634,16 @@ async def test_inspecionar_alcada_admin_pedido_operacional_manda_brief_ao_grupo(
 
     assert insp.decisao is Decisao.ALCADA_ADMIN
     assert brief in insp.whatsapp  # o grupo recebe a direção completa
-    assert "ALÇADA ADMIN (usuário)" in insp.whatsapp
+    assert "ALÇADA ADMINISTRATIVA (usuário)" in insp.whatsapp
 
 
-async def test_inspecionar_alcada_admin_sem_solucao_nem_tarefa_escala_avisando(settings):
-    # Alçada admin, match distante (0,47) e NÃO é tarefa -> ESCALAR, avisando que é alçada admin.
+async def test_inspecionar_admin_distante_ainda_encaminha_a_equipe(settings):
+    # ADR-033: admin com match distante (0,47) NÃO resolve ao cliente, mas a equipe recebe a
+    # direção que a IA tem (não escala terse). O cliente recebe só o acolhimento.
     par_distante = Similar(None, "p", "s", None, 0.47, fonte="documentacao", titulo="doc")
     resposta = _resposta(
         encontrou=True, confianca="alta", alcada_admin=True, tipo_alcada="parâmetro"
-    )
+    ).model_copy(update={"resumo_para_responsavel": "Ajustar MV_ATFMOED — verificar release."})
 
     insp = await inspecionar(
         _ticket(),
@@ -643,9 +652,10 @@ async def test_inspecionar_alcada_admin_sem_solucao_nem_tarefa_escala_avisando(s
         claude=FakeClaude(resposta=resposta),
     )
 
-    assert insp.decisao is Decisao.ESCALAR
-    assert "alçada admin (parâmetro)" in insp.whatsapp
-    assert "ALÇADA ADMIN (parâmetro)" in insp.nota
+    assert insp.decisao is Decisao.ALCADA_ADMIN
+    assert "ALÇADA ADMINISTRATIVA (parâmetro)" in insp.whatsapp
+    assert "Ajustar MV_ATFMOED" in insp.whatsapp  # a equipe recebe a direção
+    assert insp.resposta.resposta_cliente == RESPOSTA_ESCALAR_PADRAO  # cliente só o acolhimento
 
 
 async def test_inspecionar_aciona_web_e_expoe_pares_web(settings):
@@ -727,11 +737,12 @@ async def test_escalar_acolhe_cliente_mas_nota_mantem_verdade_tecnica(settings):
     assert insp.resposta.resposta_cliente == RESPOSTA_ESCALAR_PADRAO
 
 
-async def test_pedido_operacional_acolhe_escala_e_nao_vai_a_web(settings):
+async def test_pedido_operacional_vai_a_equipe_e_nao_busca_web(settings):
+    # Pedido operacional / coordenação (ex.: agendar rodada) -> EQUIPE (ADR-033), não web.
     web = FakeBuscaWeb(trechos=["não deveria ser usado"])
     insp = await inspecionar(
         _ticket(),
-        settings=_settings_web_on(settings),  # web LIGADA, mas pedido operacional não usa
+        settings=_settings_web_on(settings),  # web LIGADA, mas execução da equipe não usa
         rag_service=FakeRag([]),
         claude=FakeClaude(
             resposta=_resposta(encontrou=False, confianca="baixa", pedido_operacional=True)
@@ -739,10 +750,11 @@ async def test_pedido_operacional_acolhe_escala_e_nao_vai_a_web(settings):
         busca_web=web,
     )
 
-    assert insp.decisao is Decisao.ESCALAR
-    assert web.chamadas == []  # pedido operacional é execução humana → não busca web
+    assert insp.decisao is Decisao.ALCADA_ADMIN  # execução/coordenação -> equipe
+    assert web.chamadas == []  # execução da equipe não é dúvida pesquisável → não busca web
     assert insp.via_web is False
-    assert RESPOSTA_ESCALAR_PADRAO in insp.nota  # cliente recebe a saudação-padrão
+    assert "TAREFA / EXECUÇÃO DA EQUIPE" in insp.whatsapp  # rótulo de tarefa (não admin)
+    assert insp.resposta.resposta_cliente == RESPOSTA_ESCALAR_PADRAO  # cliente só o acolhimento
 
 
 async def test_fallback_quando_get_ticket_falha_usa_defaults(settings):

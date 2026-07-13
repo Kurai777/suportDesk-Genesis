@@ -66,11 +66,13 @@ def decidir(
         and melhor_distancia is not None
         and melhor_distancia <= distancia_maxima
     )
-    # ALÇADA ADMIN (ADR-031): parâmetro/gatilho/tabela/usuário não vão ao cliente — a EQUIPE
-    # recebe a direção no grupo. Vale quando a IA tem o que entregar: uma solução confiável
-    # (erro com correção na base) OU um pedido operacional (a tarefa e seus dados, ex.: criar
-    # usuário). Só admin SEM nada útil (nem solução nem tarefa) cai no ESCALAR comum.
-    if r.alcada_admin and (tem_solucao_confiavel or r.pedido_operacional):
+    # ENCAMINHAR À EQUIPE (ADR-031/033): a resposta NÃO vai ao cliente, vai à equipe no grupo,
+    # com a direção. Vale quando a resolução exige AÇÃO DA EQUIPE, não uma dúvida que o cliente
+    # resolve sozinho: (a) alçada admin — parâmetro/gatilho/tabela/usuário; ou (b) pedido
+    # operacional / coordenação — tarefa a executar ou agendar (criar usuário, rodar MRP...).
+    # Nesses casos a equipe recebe o que a IA tiver (solução OU brief), mesmo sem match perfeito:
+    # o guardrail de distância protege o CLIENTE; para a equipe (que verifica) a direção ajuda.
+    if r.alcada_admin or r.pedido_operacional:
         return Decisao.ALCADA_ADMIN
     if tem_solucao_confiavel:
         return Decisao.RESOLVIDO
@@ -97,6 +99,13 @@ def _rotulo_alcada(r: RespostaIA) -> str:
     return f" ({r.tipo_alcada})" if r.tipo_alcada else ""
 
 
+def _motivo_equipe(r: RespostaIA) -> str:
+    """Por que foi à equipe (ADR-033): alçada admin (com tipo) OU tarefa/coordenação."""
+    if r.alcada_admin:
+        return f"ALÇADA ADMINISTRATIVA{_rotulo_alcada(r)}"
+    return "TAREFA / EXECUÇÃO DA EQUIPE"
+
+
 def _nota(decisao: Decisao, r: RespostaIA, *, via_web: bool = False) -> str:
     if decisao is Decisao.RESOLVIDO:
         origem = (
@@ -107,11 +116,11 @@ def _nota(decisao: Decisao, r: RespostaIA, *, via_web: bool = False) -> str:
         )
         return f"{origem} Confiança: {r.confianca}.\n\n{r.resposta_cliente}"
     if decisao is Decisao.ALCADA_ADMIN:
-        # Operação de ADMIN (ADR-031): o cliente recebeu só o acolhimento; a direção completa
-        # (solução do erro OU o brief da tarefa) está em `resumo`, para a equipe resolver.
+        # Requer AÇÃO DA EQUIPE (ADR-031/033): o cliente recebeu só o acolhimento; a direção
+        # (solução do erro OU o brief da tarefa/coordenação) está em `resumo`, para a equipe.
         return (
-            f"🔧 ALÇADA ADMINISTRATIVA{_rotulo_alcada(r)} — operação de admin. O cliente "
-            "recebeu só o acolhimento padrão; NÃO instruir o cliente a executar.\n\n"
+            f"🔧 {_motivo_equipe(r)} — o cliente recebeu só o acolhimento padrão; NÃO instruir "
+            "o cliente a executar.\n\n"
             f"— Direção para a equipe —\n{r.resumo_para_responsavel}"
         )
     # ESCALAR: para o TIME. Linha de status TÉCNICA (verdade) + resumo; e o rascunho de
@@ -142,9 +151,9 @@ def _whatsapp(
             f"rascunho pronto no Freshdesk para revisão{aviso}."
         )
     if decisao is Decisao.ALCADA_ADMIN and resposta is not None:
-        # A EQUIPE recebe a direção COMPLETA + o que o chamado traz (ADR-031). O cliente não.
+        # A EQUIPE recebe a direção COMPLETA + o que o chamado traz (ADR-031/033). O cliente não.
         return (
-            f"🔧 Chamado #{ticket_id} da {empresa} — ALÇADA ADMIN{_rotulo_alcada(resposta)}. "
+            f"🔧 Chamado #{ticket_id} da {empresa} — {_motivo_equipe(resposta)}. "
             "O cliente recebeu só o acolhimento. Direção para resolvermos:"
             f"\n\n{resposta.resumo_para_responsavel}"
         )

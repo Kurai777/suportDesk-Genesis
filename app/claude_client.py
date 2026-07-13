@@ -81,13 +81,17 @@ COMO ESCREVER resposta_cliente (português, pronta para revisão humana):
   (o que investigar, versão a conferir, hipóteses, próximos passos) vai EXCLUSIVAMENTE em
   resumo_para_responsavel — JAMAIS na resposta_cliente.
 
-PEDIDO OPERACIONAL:
+PEDIDO OPERACIONAL / AÇÃO DA EQUIPE:
 - Se o chamado é uma TAREFA a ser EXECUTADA por uma pessoa (cadastro, liberação, ajuste
-  manual — ex.: "incluir cadastro do grupo tributário na SX5"), defina
-  pedido_operacional=true e encontrou_solucao=false (não é uma dúvida com resposta na base).
-  Como encontrou_solucao=false, a resposta_cliente também será a saudação-padrão; descreva a
-  execução pendente em resumo_para_responsavel, para o time providenciar. Caso contrário,
-  pedido_operacional=false.
+  manual — ex.: "incluir cadastro do grupo tributário na SX5"), OU um pedido de AÇÃO /
+  COORDENAÇÃO da equipe (agendar/reservar horário, rodar/executar uma rotina, providenciar
+  algo — ex.: "podem rodar o MRP na sexta?"), defina pedido_operacional=true e
+  encontrou_solucao=false. NÃO é uma dúvida com resposta na base — é execução da equipe.
+- NUNCA assuma COMPROMISSOS em nome da equipe na resposta_cliente: é PROIBIDO prometer horário,
+  data, prazo ou ação ("reservaremos", "faremos", "agendado para", "vamos rodar"). Como
+  encontrou_solucao=false, a resposta_cliente será a saudação-padrão; toda a execução/agendamento
+  pendente (o que fazer, quando o cliente pediu, dados) vai em resumo_para_responsavel, para a
+  equipe providenciar. Caso contrário, pedido_operacional=false.
 
 ALÇADA ADMINISTRATIVA (só administradores executam):
 - Se a solução EXIGE ou ENVOLVE uma destas operações, defina alcada_admin=true e tipo_alcada
