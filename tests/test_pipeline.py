@@ -575,6 +575,8 @@ async def test_inspecionar_escalar(settings):
     assert insp.decisao is Decisao.ESCALAR
     assert "⚠️ IA não encontrou solução na base" in insp.nota
     assert "🔴 Chamado #101" in insp.whatsapp
+    # ADR-036: mesmo escalando, a equipe recebe o CONTEXTO (o resumo do que a IA entendeu).
+    assert "Contexto: Moeda 3 do Ativo Fixo sem taxa do dia." in insp.whatsapp
     assert insp.query_web == ""  # web desligada -> nada foi pesquisado na web
 
 
@@ -823,6 +825,26 @@ async def test_incorporar_imagens_concatena_transcricao(settings):
     assert visao.chamadas[0][0] == b"\x89PNG-bytes"  # os bytes foram transcritos
     assert "Segue print." in novo.description_text  # descrição original preservada
     assert "SCC19070 no MV_ATFMOED" in novo.description_text  # transcrição concatenada
+
+
+async def test_incorporar_imagens_le_pdf_anexo(settings):
+    # ADR-037: PDF anexado (log de erro, comprovante de NF) é transcrito e concatenado à busca.
+    fd = FakeFreshdesk(anexo_bytes=b"%PDF-1.4 log")
+    visao = FakeVisao(texto="SCC19070 no log do PDF, NF 000077191")
+    ticket = TicketFreshdesk(
+        id=101, subject="Erro", description_text="Segue o log em anexo.",
+        priority="baixa", status=2, requester=Requester(name="C"), empresa="E",
+        responder_id=None,
+        attachments=[Anexo(id=9, name="log.pdf", content_type="application/pdf",
+                           attachment_url="https://s3/log.pdf")],
+    )
+
+    novo = await _incorporar_imagens(ticket, freshdesk=fd, visao=visao, settings=settings)
+
+    assert "https://s3/log.pdf" in fd.baixados  # baixou o PDF
+    assert visao.chamadas[0] == (b"%PDF-1.4 log", "application/pdf")  # transcreveu como PDF
+    assert "SCC19070 no log do PDF" in novo.description_text
+    assert "Segue o log em anexo." in novo.description_text  # descrição original preservada
 
 
 async def test_incorporar_imagens_inline_do_corpo(settings):

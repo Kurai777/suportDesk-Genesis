@@ -162,9 +162,16 @@ def _whatsapp(
         if resposta is not None and resposta.alcada_admin
         else ""
     )
+    # Mesmo sem solução, a EQUIPE recebe o CONTEXTO do que a IA entendeu do problema (ADR-036) —
+    # não só "olhe pessoalmente". O resumo é o que a IA compreendeu do chamado (e das imagens).
+    contexto = (
+        f"\n\nContexto: {resposta.resumo_para_responsavel}"
+        if resposta is not None and resposta.resumo_para_responsavel.strip()
+        else ""
+    )
     return (
         f"🔴 Chamado #{ticket_id} da {empresa} — não encontrei solução na base do "
-        f"TOTVS{admin}. Recomendo olhar pessoalmente."
+        f"TOTVS{admin}. Recomendo olhar pessoalmente.{contexto}"
     )
 
 
@@ -393,7 +400,8 @@ async def _incorporar_imagens(
     async def _do_inline(url):
         return await freshdesk.baixar_imagem(url)
 
-    fontes = [(_do_anexo, a, f"anexo {a.id}") for a in ticket.imagens]
+    fontes = [(_do_anexo, a, f"img {a.id}") for a in ticket.imagens]
+    fontes += [(_do_anexo, a, f"pdf {a.id}") for a in ticket.pdfs]  # PDFs anexos (ADR-037)
     fontes += [(_do_inline, u, "inline") for u in ticket.imagens_inline]
     fontes = fontes[:_MAX_IMAGENS]
     if not fontes:

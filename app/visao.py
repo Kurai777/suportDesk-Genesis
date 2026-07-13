@@ -31,14 +31,17 @@ from app.config import Settings
 _MAX_TOKENS = 1024
 # Sentinela devolvida pelo modelo quando não há texto legível/útil — mapeada para "".
 _MARCADOR_VAZIO = "[SEM_TEXTO]"
-# Formatos aceitos pela API de visão do Claude.
-_TIPOS_SUPORTADOS = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+# Formatos aceitos: imagens (visão do Claude) + PDF (logs de erro, comprovantes de NF — ADR-037).
+_TIPOS_IMAGEM = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+_TIPO_PDF = "application/pdf"
+_TIPOS_SUPORTADOS = _TIPOS_IMAGEM | {_TIPO_PDF}
 
 _PROMPT = (
-    "Transcreva SOMENTE o texto legível desta imagem — logs, mensagens de erro, códigos "
-    "(ex.: SCC19070), nomes de parâmetros/tabelas/campos e o conteúdo de tabelas — exatamente "
-    "como aparece, preservando a ordem. NÃO descreva a imagem, NÃO explique, NÃO resuma e NÃO "
-    f"invente nada. Se não houver texto legível e útil, responda APENAS com {_MARCADOR_VAZIO}."
+    "Transcreva SOMENTE o texto legível deste anexo (imagem ou PDF) — logs, mensagens de erro, "
+    "códigos (ex.: SCC19070), nomes de parâmetros/tabelas/campos e o conteúdo de tabelas (ex.: "
+    "dados de uma nota fiscal) — exatamente como aparece, preservando a ordem. NÃO descreva, NÃO "
+    "explique, NÃO resuma e NÃO invente nada. Sem texto legível e útil, responda APENAS com "
+    f"{_MARCADOR_VAZIO}."
 )
 
 _retry_visao = retry(
@@ -62,7 +65,7 @@ class VisaoClient:
         self._model = settings.claude_model
 
     async def transcrever(self, imagem: bytes, content_type: str) -> str:
-        """Devolve o texto legível da imagem; "" se tipo não suportado, vazia ou sem texto."""
+        """Texto legível do anexo (imagem OU PDF); "" se tipo não suportado, vazio ou sem texto."""
         tipo = (content_type or "").split(";", 1)[0].strip().lower()
         if tipo not in _TIPOS_SUPORTADOS or not imagem:
             return ""
@@ -72,25 +75,18 @@ class VisaoClient:
 
     @_retry_visao
     async def _criar(self, b64: str, media_type: str):
+        # PDF vai como bloco "document"; imagem, como "image" (ADR-037).
+        tipo_bloco = "document" if media_type == _TIPO_PDF else "image"
+        anexo = {
+            "type": tipo_bloco,
+            "source": {"type": "base64", "media_type": media_type, "data": b64},
+        }
         return await self._client.messages.create(
             model=self._model,
             max_tokens=_MAX_TOKENS,
             temperature=0,
             messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": b64,
-                            },
-                        },
-                        {"type": "text", "text": _PROMPT},
-                    ],
-                }
+                {"role": "user", "content": [anexo, {"type": "text", "text": _PROMPT}]}
             ],
         )
 

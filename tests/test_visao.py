@@ -79,10 +79,24 @@ async def test_tipo_nao_suportado_nao_chama_modelo(settings):
     fake = FakeVisaoAnthropic("não deveria ser usado")
     client = VisaoClient(settings, client=fake)
 
-    resultado = await client.transcrever(b"%PDF-1.4", "application/pdf")
+    resultado = await client.transcrever(b"PK-zip-bytes", "application/zip")
 
     assert resultado == ""
     assert fake.messages.chamadas == []  # modelo NÃO foi chamado
+
+
+async def test_transcreve_pdf_usa_bloco_document(settings):
+    # ADR-037: PDF (log de erro / comprovante de NF) vai como bloco "document", não "image".
+    fake = FakeVisaoAnthropic("Log: SCC19070 ao processar a NF 000077191")
+    client = VisaoClient(settings, client=fake)
+
+    texto = await client.transcrever(b"%PDF-1.4 fake", "application/pdf")
+
+    assert "SCC19070" in texto
+    conteudo = fake.messages.chamadas[-1]["messages"][0]["content"]
+    doc = next(b for b in conteudo if b["type"] == "document")
+    assert doc["source"]["media_type"] == "application/pdf"
+    assert all(b["type"] != "image" for b in conteudo)  # não mandou como imagem
 
 
 async def test_bytes_vazios_nao_chama_modelo(settings):

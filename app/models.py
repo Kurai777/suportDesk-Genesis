@@ -250,6 +250,10 @@ class Anexo(BaseModel):
     def eh_imagem(self) -> bool:
         return self.content_type.lower().startswith("image/")
 
+    @property
+    def eh_pdf(self) -> bool:
+        return self.content_type.lower().split(";", 1)[0].strip() == "application/pdf"
+
 
 class TicketFreshdesk(BaseModel):
     """Chamado normalizado a partir de GET /tickets/{id}?include=requester,company,stats."""
@@ -273,6 +277,11 @@ class TicketFreshdesk(BaseModel):
     def imagens(self) -> list[Anexo]:
         """Anexos que são imagens (prints de erro/logs) — candidatos à transcrição (ADR-023)."""
         return [a for a in self.attachments if a.eh_imagem]
+
+    @property
+    def pdfs(self) -> list[Anexo]:
+        """Anexos PDF (logs de erro, comprovantes de NF) — também transcritos (ADR-037)."""
+        return [a for a in self.attachments if a.eh_pdf]
 
     @classmethod
     def from_freshdesk(cls, payload: dict[str, Any]) -> "TicketFreshdesk":

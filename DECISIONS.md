@@ -962,3 +962,27 @@ Um módulo só é considerado PRONTO quando:
 - **Testes (mock/respx, zero rede):** `from_freshdesk` extrai as inline e ignora logo externo;
   `baixar_imagem` sem auth + content_type do header; `_incorporar_imagens` lê a inline e concatena
   (SPED050/MATA103 entram na descrição). **203 passando, ruff limpo.**
+
+## ADR-036 — Contexto na escalada: a equipe recebe o que a IA entendeu
+
+- **Feedback (auditoria):** no ESCALAR, a equipe recebia só "🔴 não encontrei solução na base,
+  olhe pessoalmente" — zero contexto. O usuário pediu para "contextualizar mais os chamados que não
+  foram encontrados na base".
+- **Decisão:** a mensagem de WhatsApp do ESCALAR passa a anexar o CONTEXTO — o
+  `resumo_para_responsavel` (o que a IA compreendeu do chamado e das imagens/PDFs), quando houver.
+  A nota interna já trazia o resumo; agora o grupo também. Não muda a decisão, só enriquece o
+  que a equipe vê para começar a investigar.
+- **Testes:** ESCALAR → a mensagem inclui "Contexto: {resumo}". **50 testes de pipeline verdes.**
+
+## ADR-037 — Ler PDFs anexados (logs de erro, comprovantes de NF)
+
+- **Feedback:** alguns chamados trazem logs de erro ou comprovantes de nota fiscal em PDF; o
+  usuário quer que a IA leia esses PDFs para contextualizar, como já faz com imagens (ADR-023/035).
+- **Decisão:** `VisaoClient.transcrever` passa a aceitar `application/pdf` — o Claude lê PDF
+  nativamente via bloco `document` (imagem segue como `image`). Mesmo prompt e MESMA regra de ouro:
+  transcreve só o texto legível (logs, códigos, dados da NF); ilegível/sem texto → vazio, nunca
+  inventa. `TicketFreshdesk.pdfs` expõe os anexos PDF; `_incorporar_imagens` os inclui na leitura,
+  junto de imagens (anexo + inline), sob o mesmo teto `_MAX_IMAGENS`.
+- **Testes (mock, zero rede):** PDF vai como bloco `document` (não `image`); tipo não suportado
+  (ex.: zip) não chama o modelo; `_incorporar_imagens` lê o PDF anexo e concatena à busca.
+  **205 passando, ruff limpo.** (Verificação ao vivo pendente de um chamado real com PDF.)
