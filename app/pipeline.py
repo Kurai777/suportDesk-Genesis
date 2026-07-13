@@ -288,12 +288,15 @@ async def inspecionar(
     via_web = False
     pares_web: list[Similar] = []
     query_web = ""
+    # A web tenta em TODO ESCALAR (ADR-034): "escalou" já significa que NÃO há solução local
+    # confiável — seja porque não achou, seja porque o guardrail de distância (ADR-030) rejeitou
+    # um `encontrou=true` de match distante (ex.: #4446, docs de NFSE p/ NF de entrada). Antes o
+    # gate exigia `not encontrou_solucao` e pulava justamente esse caso. Pedido operacional já vira
+    # ALCADA_ADMIN (não ESCALAR), então não chega aqui.
     if (
         settings.busca_web_ativa
         and busca_web is not None
         and decisao is Decisao.ESCALAR
-        and not resposta.encontrou_solucao
-        and not resposta.pedido_operacional
     ):
         # Registra a query REAL enviada aos domínios TOTVS (mesmo que a web volte vazia),
         # para a interface mostrar exatamente o que foi pesquisado (ADR-027).

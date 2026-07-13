@@ -916,3 +916,26 @@ Um módulo só é considerado PRONTO quando:
   EQUIPE com direção, cliente só o acolhimento.
 - **Testes:** admin (mesmo distante) → EQUIPE; sem admin/tarefa e distante → ESCALAR;
   pedido-operacional → EQUIPE e não busca web; rótulos por motivo. **199 passando, ruff limpo.**
+
+## ADR-034 — Busca web tenta em TODO ESCALAR (inclusive guardrail-rejeitado)
+
+- **2ª classificação humana (lote com busca web LIGADA, 17 chamados — 1 caiu por queda transitória
+  da Neon):** **15 acertou / 0 parcial / 2 errou**. O que importa: **0 erro perigoso** — os 2 "errou"
+  (#4446, #4437) são ESCALAR, o cliente recebeu só o acolhimento; os 2 RESOLVIDO foram os dois
+  certos. As correções ADR-030/031/032/033 zeraram o risco ao cliente do 1º lote (onde o #4453 era um
+  RESOLVIDO errado).
+- **Bug achado no #4446:** NF de entrada não transmitida à SEFAZ. O Claude achou docs de NFSE
+  (serviço, domínio errado) → `encontrou_solucao=true`; o guardrail escalou pela distância (0,462).
+  Mas o gate da busca web exigia `not encontrou_solucao`, então a web **nunca disparou** — justo o
+  caso em que ela poderia achar a resposta certa (NF-e/SEFAZ).
+- **Decisão:** o gate da web passa a ser só `decisao is ESCALAR` (removido o `not encontrou_solucao`).
+  ESCALAR já significa "sem solução local CONFIÁVEL" — não achou, OU o guardrail (ADR-030) rejeitou um
+  match distante. Nos dois, vale tentar a web. Pedido operacional vira ALCADA_ADMIN (ADR-033), então
+  não chega ao gate. A ADR-032 garante que, se a web voltar vazia, o cliente ainda recebe só a
+  saudação.
+- **Follow-up (mantido):** cobertura da base para os ESCALAR que deveriam ter resposta (ex.: #4446
+  NF-e/SEFAZ; #4437 "Exclusão"). A automação, se vier, começa pelo lane RESOLVIDO — hoje seletivo
+  (2/17) e 100% correto nos dois lotes, mas amostra pequena; medir mais antes de decidir.
+- **Testes:** guardrail escala `encontrou=true` + web ligada → a web TENTA e pode resolver via web.
+  **200 passando, ruff limpo.** (Verificação ao vivo do #4446 adiada por overload transitório da API
+  Anthropic; o teste cobre o caminho.)

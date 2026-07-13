@@ -496,6 +496,29 @@ async def test_web_vazia_escala_mesmo_assim(settings):
     assert "🔴 Chamado #101 da Empresa A" in wa.enviados[0][1]
 
 
+async def test_web_tenta_quando_guardrail_rejeita_encontrou_true(settings):
+    # ADR-034: o Claude achou algo LOCAL (encontrou=true) mas o guardrail escalou (par distante,
+    # 0,46). Antes o gate `not encontrou` pulava a web; agora ela TENTA e pode resolver (#4446).
+    web = FakeBuscaWeb(trechos=["[https://tdn.totvs.com/x]\nSolução correta da web."])
+    claude = FakeClaudeRoteia(
+        local=_resposta(encontrou=True, confianca="alta"),  # achou local, mas...
+        web=_resposta(encontrou=True, confianca="media"),
+    )
+    par_distante = Similar(None, "p", "s", None, 0.46, fonte="documentacao", titulo="x")
+
+    insp = await inspecionar(
+        _ticket(),
+        settings=_settings_web_on(settings),
+        rag_service=FakeRag([par_distante]),
+        claude=claude,
+        busca_web=web,
+    )
+
+    assert web.chamadas  # a web foi tentada APESAR de encontrou=true no local
+    assert insp.via_web is True
+    assert insp.decisao is Decisao.RESOLVIDO  # a web trouxe a solução
+
+
 async def test_flag_desligada_nunca_chama_web(settings):
     fd = FakeFreshdesk(ticket=_ticket())
     wa = FakeWhatsApp()
