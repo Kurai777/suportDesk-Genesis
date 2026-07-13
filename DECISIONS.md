@@ -1056,3 +1056,23 @@ Um módulo só é considerado PRONTO quando:
 - **Testes:** RESOLVIDO+alta+perto → elegível; ESCALAR/ALÇADA_ADMIN → não; confiança não-alta → não;
   RESOLVIDO local distante → não; web distante → elegível (decisão do usuário). **211 passando,
   ruff limpo.**
+
+## ADR-042 — Modo SOMBRA da Fase 2 (medir o auto-envio sem enviar)
+
+- **Contexto:** o lote 2 re-rodado com o pipeline completo deu **18/18 acertou** (era 11/3/3), com
+  os **4 auto-elegíveis 100% corretos**. Sinal forte para a Fase 2, mas amostra ainda pequena e os
+  candidatos via web pedem cautela. Decisão do usuário: **modo sombra primeiro** — risco zero.
+- **Decisão:** flag `MODO_SOMBRA_AUTO` (default false). Ligado, a nota interna dos chamados
+  AUTO-ELEGÍVEIS ganha um aviso: "🤖 MODO SOMBRA (Fase 2): este rascunho SERIA ENVIADO
+  AUTOMATICAMENTE ao cliente. NÃO foi enviado — se você editar/descartar, registra que o auto-envio
+  erraria aqui." NADA é enviado ao cliente; o fluxo segue COPILOTO. Serve para, em produção,
+  comparar o que a IA enviaria × o que a equipe realmente responde, acumulando evidência real.
+- **Onde:** `Inspecao.auto_elegivel` é calculado no `inspecionar` (após a decisão final, incluindo
+  o desfecho da web) via `_elegivel_auto` (núcleo por campos; `elegivel_auto(insp,...)` é o wrapper).
+  O `_nota` insere o aviso só quando `modo_sombra and auto_elegivel and RESOLVIDO`. Vale tanto no
+  webhook (produção) quanto no `/teste`.
+- **Fase 2 real (ainda NÃO):** quando o modo sombra provar acerto em volume, o próximo passo é o
+  envio público de verdade — recomendado num corte MAIS APERTADO que o de medição (local, não-web,
+  distância < 0,35), atrás de um flag dedicado + kill switch, com `freshdesk.responder_publico()`.
+- **Testes:** modo sombra ligado + RESOLVIDO auto-elegível → nota avisa; desligado → não avisa; o
+  fluxo/decisão não muda. **213 passando, ruff limpo.**

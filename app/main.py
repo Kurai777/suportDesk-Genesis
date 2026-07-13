@@ -46,7 +46,6 @@ from app.pipeline import (
     IdempotenciaRepository,
     Inspecao,
     concatenar_transcricoes,
-    elegivel_auto,
     inspecionar,
     processar,
 )
@@ -164,7 +163,7 @@ def _par_para_modelo(p: Similar) -> ParInspecao:
     )
 
 
-def _para_resposta(insp: Inspecao, empresa: str, settings: Settings) -> TesteResposta:
+def _para_resposta(insp: Inspecao, empresa: str) -> TesteResposta:
     r = insp.resposta
     return TesteResposta(
         empresa=empresa,
@@ -180,7 +179,7 @@ def _para_resposta(insp: Inspecao, empresa: str, settings: Settings) -> TesteRes
         resumo_para_responsavel=r.resumo_para_responsavel,
         urgencia=r.urgencia,
         via_web=insp.via_web,
-        auto_elegivel=elegivel_auto(insp, settings.limiar_auto_resposta),
+        auto_elegivel=insp.auto_elegivel,
         query_web=insp.query_web,
         nota=insp.nota,
         whatsapp=insp.whatsapp,
@@ -252,4 +251,4 @@ async def teste_processar(payload: TesteRequest, request: Request) -> TesteRespo
     trechos = await _transcrever_enviadas(request.app, payload.imagens)
     texto = concatenar_transcricoes(payload.texto, trechos)
     insp = await _inspecao_do_texto(request.app, texto, payload.empresa)
-    return _para_resposta(insp, empresa, request.app.state.settings)
+    return _para_resposta(insp, empresa)

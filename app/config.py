@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # resposta automática (Fase 2). Hoje é só um MARCADOR de medição — nada é enviado (Fase 1
     # copiloto). Default = mesmo do guardrail; aperte com dados antes de ligar a Fase 2.
     limiar_auto_resposta: float = 0.40
+    # MODO SOMBRA da Fase 2 (ADR-042): true = a nota dos chamados auto-elegíveis ganha um aviso de
+    # que o rascunho SERIA enviado automaticamente (mas NÃO é — segue copiloto). Serve para a equipe
+    # comparar, em produção, o que a IA enviaria vs o que ela responde. NÃO envia nada ao cliente.
+    modo_sombra_auto: bool = False
 
     def telefone_responsavel(self, agente_id: int | None) -> str:
         """Resolve o telefone do responsável (agente -> telefone), com fallback.

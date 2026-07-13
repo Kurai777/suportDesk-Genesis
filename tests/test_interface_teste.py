@@ -118,7 +118,7 @@ async def test_inspecao_do_texto_nao_usa_freshdesk_nem_whatsapp(settings, banco_
     assert insp.decisao is Decisao.ESCALAR  # base de teste vazia -> escala
     assert insp.nota and insp.whatsapp
     assert insp.via_web is False
-    resp = _para_resposta(insp, "Cliente ACME", settings)
+    resp = _para_resposta(insp, "Cliente ACME")
     assert resp.empresa == "Cliente ACME"
     assert resp.decisao == "escalar"
     assert resp.pedido_operacional is False  # exposto na tela (ADR-020)

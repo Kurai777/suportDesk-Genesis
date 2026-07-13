@@ -108,7 +108,14 @@ def _motivo_equipe(r: RespostaIA) -> str:
     return "TAREFA / EXECUÇÃO DA EQUIPE"
 
 
-def _nota(decisao: Decisao, r: RespostaIA, *, via_web: bool = False) -> str:
+def _nota(
+    decisao: Decisao,
+    r: RespostaIA,
+    *,
+    via_web: bool = False,
+    auto_elegivel: bool = False,
+    modo_sombra: bool = False,
+) -> str:
     if decisao is Decisao.RESOLVIDO:
         origem = (
             "🌐 Rascunho gerado a partir de BUSCA WEB em referência técnica TOTVS/Protheus "
@@ -116,7 +123,16 @@ def _nota(decisao: Decisao, r: RespostaIA, *, via_web: bool = False) -> str:
             if via_web
             else "🤖 Rascunho gerado por IA (revisar antes de enviar)."
         )
-        return f"{origem} Confiança: {r.confianca}.\n\n{r.resposta_cliente}"
+        # MODO SOMBRA (ADR-042): sinaliza que ESTE rascunho seria auto-enviado na Fase 2 — mas
+        # NÃO foi (copiloto). Se o agente editar/descartar, é evidência de que o auto erraria.
+        sombra = (
+            "🤖 MODO SOMBRA (Fase 2): este rascunho SERIA ENVIADO AUTOMATICAMENTE ao cliente. "
+            "NÃO foi enviado — revise; se você editar ou descartar, registra que o auto-envio "
+            "erraria aqui.\n\n"
+            if modo_sombra and auto_elegivel
+            else ""
+        )
+        return f"{sombra}{origem} Confiança: {r.confianca}.\n\n{r.resposta_cliente}"
     if decisao is Decisao.ALCADA_ADMIN:
         # Requer AÇÃO DA EQUIPE (ADR-031/033): o cliente recebeu só o acolhimento; a direção
         # (solução do erro OU o brief da tarefa/coordenação) está em `resumo`, para a equipe.
@@ -236,8 +252,23 @@ class Inspecao:
     via_web: bool
     pares_web: list[Similar] = field(default_factory=list)  # trechos web (se acionada)
     query_web: str = ""  # a query REAL enviada aos domínios TOTVS ("" = web não acionada)
+    auto_elegivel: bool = False  # candidato a resposta automática (recorte ADR-041) — só marcador
     nota: str = ""  # nota interna que SERIA criada no Freshdesk
     whatsapp: str = ""  # mensagem que SERIA enviada no WhatsApp
+
+
+def _elegivel_auto(
+    decisao: Decisao,
+    resposta: RespostaIA,
+    melhor_distancia: float | None,
+    via_web: bool,
+    limiar_auto: float,
+) -> bool:
+    """Núcleo do recorte de auto-resposta (ADR-041), por CAMPOS — antes de montar a Inspecao."""
+    if decisao is not Decisao.RESOLVIDO or resposta.confianca != "alta":
+        return False
+    perto = melhor_distancia is not None and melhor_distancia <= limiar_auto
+    return perto or via_web
 
 
 def elegivel_auto(insp: Inspecao, limiar_auto: float) -> bool:
@@ -248,11 +279,8 @@ def elegivel_auto(insp: Inspecao, limiar_auto: float) -> bool:
     (melhor par <= `limiar_auto`) OU a resposta veio da busca web. Só marca; virar a Fase 2
     depende da medição humana provar que os candidatos acertam.
     """
-    if insp.decisao is not Decisao.RESOLVIDO or insp.resposta.confianca != "alta":
-        return False
     melhor = min((p.distancia for p in insp.pares), default=None)
-    perto = melhor is not None and melhor <= limiar_auto
-    return perto or insp.via_web
+    return _elegivel_auto(insp.decisao, insp.resposta, melhor, insp.via_web, limiar_auto)
 
 
 async def _query_de_busca(
@@ -339,6 +367,11 @@ async def inspecionar(
     if decisao is not Decisao.RESOLVIDO and resposta.resposta_cliente != RESPOSTA_ESCALAR_PADRAO:
         resposta = resposta.model_copy(update={"resposta_cliente": RESPOSTA_ESCALAR_PADRAO})
 
+    # Recorte de auto-resposta (ADR-041) + modo sombra (ADR-042): calculado após a decisão final
+    # (inclui o desfecho da web), para marcar e — se em sombra — sinalizar na nota. NÃO envia nada.
+    auto_elegivel = _elegivel_auto(
+        decisao, resposta, melhor_distancia, via_web, settings.limiar_auto_resposta
+    )
     return Inspecao(
         problema=problema,
         query=query,
@@ -348,7 +381,14 @@ async def inspecionar(
         via_web=via_web,
         pares_web=pares_web,
         query_web=query_web,
-        nota=_nota(decisao, resposta, via_web=via_web),
+        auto_elegivel=auto_elegivel,
+        nota=_nota(
+            decisao,
+            resposta,
+            via_web=via_web,
+            auto_elegivel=auto_elegivel,
+            modo_sombra=settings.modo_sombra_auto,
+        ),
         whatsapp=_whatsapp(decisao, ticket.id, ticket.empresa, resposta, via_web=via_web),
     )
 

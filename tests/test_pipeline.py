@@ -338,6 +338,36 @@ def test_elegivel_auto_aceita_web_mesmo_com_par_local_distante():
     assert elegivel_auto(insp, 0.40) is True
 
 
+async def test_inspecionar_modo_sombra_marca_auto_elegivel_sem_enviar(settings):
+    # ADR-042: RESOLVIDO auto-elegível + modo sombra ligado -> a nota AVISA que seria auto-enviado,
+    # mas nada muda no fluxo (segue copiloto: só nota interna). O cliente recebe a solução normal.
+    sombra = settings.model_copy(update={"modo_sombra_auto": True})
+
+    insp = await inspecionar(
+        _ticket(),
+        settings=sombra,
+        rag_service=FakeRag([Similar(1, "p", "s", "E", 0.28)]),  # match perto
+        claude=FakeClaude(resposta=_resposta(encontrou=True, confianca="alta")),
+    )
+
+    assert insp.decisao is Decisao.RESOLVIDO
+    assert insp.auto_elegivel is True
+    assert "MODO SOMBRA" in insp.nota and "SERIA ENVIADO AUTOMATICAMENTE" in insp.nota
+
+
+async def test_inspecionar_sem_modo_sombra_nao_avisa(settings):
+    # Modo sombra desligado (default) -> mesmo auto-elegível, a nota NÃO traz o aviso.
+    insp = await inspecionar(
+        _ticket(),
+        settings=settings,  # modo_sombra_auto=False por padrão
+        rag_service=FakeRag([Similar(1, "p", "s", "E", 0.28)]),
+        claude=FakeClaude(resposta=_resposta(encontrou=True, confianca="alta")),
+    )
+
+    assert insp.auto_elegivel is True
+    assert "MODO SOMBRA" not in insp.nota
+
+
 # --- fluxo resolvido -------------------------------------------------------
 
 
