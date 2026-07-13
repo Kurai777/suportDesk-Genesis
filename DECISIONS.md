@@ -937,5 +937,28 @@ Um módulo só é considerado PRONTO quando:
   NF-e/SEFAZ; #4437 "Exclusão"). A automação, se vier, começa pelo lane RESOLVIDO — hoje seletivo
   (2/17) e 100% correto nos dois lotes, mas amostra pequena; medir mais antes de decidir.
 - **Testes:** guardrail escala `encontrou=true` + web ligada → a web TENTA e pode resolver via web.
-  **200 passando, ruff limpo.** (Verificação ao vivo do #4446 adiada por overload transitório da API
-  Anthropic; o teste cobre o caminho.)
+  **200 passando, ruff limpo.**
+
+## ADR-035 — Ler imagens INLINE do corpo do e-mail (não só anexos)
+
+- **Achado (#4437 "Exclusão"):** a IA pesquisou só pelo assunto vago "Exclusão" e escalou, mas o
+  chamado tinha **prints do erro** — que mostravam a causa exata: `Invalid object name
+  'TMTSS.DBO.SPED050'` na rotina **MATA103** (erro de SPED/TSS), específico e pesquisável. A leitura
+  de imagens (ADR-023) só olhava `ticket.attachments`; o #4437 tinha **0 anexos** e **3 imagens
+  INLINE** (`<img src="https://attachment.freshdesk.com/inline/...">`) coladas no corpo. Como a
+  MAIORIA dos chamados manda o screenshot colado (não anexado), o pipeline ignorava o sinal mais
+  forte do erro.
+- **Decisão — ler as duas fontes:** `TicketFreshdesk.from_freshdesk` extrai as URLs de imagens inline
+  do HTML `description` (`_imagens_inline_do_html`, campo novo `imagens_inline`).
+  `FreshdeskClient.baixar_imagem(url)` baixa a inline (token JWT na URL autentica → SEM auth Basic;
+  `follow_redirects` p/ S3) e devolve (bytes, content_type do header). `_incorporar_imagens` lê
+  ANEXOS + INLINE sob o mesmo teto `_MAX_IMAGENS`, transcreve e concatena à busca — best-effort.
+- **Filtro:** só `<img>` de `*freshdesk*` (prints colados viram inline-attachment do Freshdesk);
+  logos externos de assinatura ficam de fora. `&amp;` desescapado; ordem preservada, sem repetir.
+- **Verificado (sem gastar Claude):** o #4437 tem 0 anexos e 3 inline; o download da 1ª inline dá
+  HTTP 200, `image/png`, 184 KB, SEM auth. A transcrição ponta a ponta (vira SPED050/MATA103 na
+  busca) ficou PENDENTE — a chave Anthropic está **sem créditos** (`credit balance too low`); foi o
+  que também travou a verificação ao vivo do #4446/#4437, não overload como eu havia suposto.
+- **Testes (mock/respx, zero rede):** `from_freshdesk` extrai as inline e ignora logo externo;
+  `baixar_imagem` sem auth + content_type do header; `_incorporar_imagens` lê a inline e concatena
+  (SPED050/MATA103 entram na descrição). **203 passando, ruff limpo.**

@@ -376,27 +376,36 @@ async def _incorporar_imagens(
     visao: VisaoClient | None,
     settings: Settings,
 ) -> TicketFreshdesk:
-    """Transcreve o texto legível das imagens do chamado e concatena à descrição (ADR-023).
+    """Transcreve o texto legível das imagens do chamado e concatena à descrição (ADR-023/035).
 
-    BEST-EFFORT: falha ao baixar/transcrever uma imagem é ignorada (não derruba o chamado).
-    Se a visão está desligada/ausente ou não há imagens, retorna o ticket INALTERADO. A
-    transcrição entra ANTES da busca — vira parte da query do RAG e do contexto do Claude.
+    Lê DUAS fontes de imagem, com um teto TOTAL de `_MAX_IMAGENS`: anexos (Anexo) e imagens
+    INLINE coladas no corpo do e-mail (ADR-035 — o caso mais comum). BEST-EFFORT: falha ao
+    baixar/transcrever uma imagem é ignorada (não derruba o chamado). Sem visão/imagens, retorna
+    o ticket INALTERADO. A transcrição entra ANTES da busca — vira parte da query e do contexto.
     """
     if visao is None or not settings.leitura_imagens_ativa:
         return ticket
-    imagens = ticket.imagens[:_MAX_IMAGENS]
-    if not imagens:
+
+    # (bytes-loader, rótulo p/ log) por imagem, anexos primeiro, até o teto TOTAL.
+    async def _do_anexo(a):
+        return await freshdesk.baixar_anexo(a.attachment_url), a.content_type
+
+    async def _do_inline(url):
+        return await freshdesk.baixar_imagem(url)
+
+    fontes = [(_do_anexo, a, f"anexo {a.id}") for a in ticket.imagens]
+    fontes += [(_do_inline, u, "inline") for u in ticket.imagens_inline]
+    fontes = fontes[:_MAX_IMAGENS]
+    if not fontes:
         return ticket
 
     trechos: list[str] = []
-    for anexo in imagens:
+    for carregar, ref, rotulo in fontes:
         try:
-            dados = await freshdesk.baixar_anexo(anexo.attachment_url)
-            texto = await visao.transcrever(dados, anexo.content_type)
+            dados, tipo = await carregar(ref)
+            texto = await visao.transcrever(dados, tipo)
         except Exception:
-            logger.exception(
-                "Falha ao ler imagem %s (ticket %s) — ignorada.", anexo.id, ticket.id
-            )
+            logger.exception("Falha ao ler imagem (%s, ticket %s) — ignorada.", rotulo, ticket.id)
             continue
         if texto.strip():
             trechos.append(texto.strip())

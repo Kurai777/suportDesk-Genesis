@@ -6,9 +6,24 @@ Contém:
 - `TicketFreshdesk`  : o chamado normalizado, buscado via API do Freshdesk (Módulo 3).
 """
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Imagens embutidas no corpo do e-mail: <img src="https://attachment.freshdesk.com/inline/...">.
+# Prints colados viram inline-attachments do Freshdesk (token JWT na URL, baixa sem auth). ADR-035.
+_IMG_INLINE = re.compile(
+    r'<img[^>]+src="(https://[^"]*freshdesk[^"]*)"', re.IGNORECASE
+)
+
+
+def _imagens_inline_do_html(html: str) -> list[str]:
+    """URLs das imagens inline (prints do erro) no HTML da descrição, em ordem, sem repetir."""
+    vistas: dict[str, None] = {}
+    for url in _IMG_INLINE.findall(html or ""):
+        vistas.setdefault(url.replace("&amp;", "&"), None)
+    return list(vistas)
 
 # --- Vocabulários controlados ---------------------------------------------
 
@@ -250,6 +265,9 @@ class TicketFreshdesk(BaseModel):
     empresa: str
     responder_id: int | None = None
     attachments: list[Anexo] = Field(default_factory=list)
+    # URLs de imagens EMBUTIDAS (inline) no corpo do e-mail — prints colados, não anexados
+    # (ADR-035). A maioria dos chamados manda o screenshot do erro assim, não como anexo.
+    imagens_inline: list[str] = Field(default_factory=list)
 
     @property
     def imagens(self) -> list[Anexo]:
@@ -274,4 +292,5 @@ class TicketFreshdesk(BaseModel):
             empresa=company.get("name") or EMPRESA_DESCONHECIDA,
             responder_id=payload.get("responder_id"),
             attachments=[Anexo.model_validate(a) for a in (payload.get("attachments") or [])],
+            imagens_inline=_imagens_inline_do_html(payload.get("description") or ""),
         )

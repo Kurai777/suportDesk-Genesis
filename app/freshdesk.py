@@ -124,6 +124,24 @@ class FreshdeskClient:
         resp.raise_for_status()
         return resp.content
 
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(_TENTATIVAS),
+        wait=_esperar,
+        retry=retry_if_exception(_e_retentavel),
+    )
+    async def baixar_imagem(self, url: str) -> tuple[bytes, str]:
+        """Baixa uma imagem INLINE do corpo do e-mail (ADR-035). Retorna (bytes, content_type).
+
+        A URL é do Freshdesk (`attachment.freshdesk.com/inline/...`) com token JWT que já
+        autentica — baixa SEM a auth Basic. `follow_redirects` porque pode redirecionar ao S3;
+        o content_type vem do header da resposta (a URL inline não o traz de antemão).
+        """
+        resp = await self._client.get(url, follow_redirects=True)
+        resp.raise_for_status()
+        tipo = (resp.headers.get("content-type") or "").split(";", 1)[0].strip()
+        return resp.content, tipo
+
     async def close(self) -> None:
         await self._client.aclose()
 

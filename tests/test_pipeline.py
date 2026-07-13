@@ -60,6 +60,10 @@ class FakeFreshdesk:
             raise self._erro_anexo
         return self._anexo_bytes
 
+    async def baixar_imagem(self, url):
+        self.baixados.append(url)
+        return b"INLINE-IMG", "image/png"
+
 
 class FakeVisao:
     def __init__(self, texto="", erro=None):
@@ -819,6 +823,25 @@ async def test_incorporar_imagens_concatena_transcricao(settings):
     assert visao.chamadas[0][0] == b"\x89PNG-bytes"  # os bytes foram transcritos
     assert "Segue print." in novo.description_text  # descrição original preservada
     assert "SCC19070 no MV_ATFMOED" in novo.description_text  # transcrição concatenada
+
+
+async def test_incorporar_imagens_inline_do_corpo(settings):
+    # ADR-035: print COLADO no e-mail (inline, sem anexo) é lido e concatenado à busca.
+    fd = FakeFreshdesk()
+    visao = FakeVisao(texto="Invalid object name TMTSS.DBO.SPED050 MATA103")
+    ticket = TicketFreshdesk(
+        id=101, subject="Exclusão", description_text="Erro ao excluir nota.",
+        priority="baixa", status=2, requester=Requester(name="C"), empresa="E",
+        responder_id=None,
+        imagens_inline=["https://attachment.freshdesk.com/inline/attachment?token=JWT"],
+    )
+
+    novo = await _incorporar_imagens(ticket, freshdesk=fd, visao=visao, settings=settings)
+
+    assert fd.baixados == ["https://attachment.freshdesk.com/inline/attachment?token=JWT"]
+    assert visao.chamadas[0] == (b"INLINE-IMG", "image/png")  # baixou inline + content_type
+    assert "SPED050" in novo.description_text and "MATA103" in novo.description_text
+    assert "Erro ao excluir nota." in novo.description_text  # descrição original preservada
 
 
 async def test_incorporar_imagens_ilegivel_mantem_ticket(settings):

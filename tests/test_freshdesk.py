@@ -161,6 +161,39 @@ def test_from_freshdesk_parseia_anexos_e_filtra_imagens():
     assert [a.id for a in ticket.imagens] == [1]  # só a imagem
 
 
+def test_from_freshdesk_extrai_imagens_inline_do_corpo():
+    # Prints colados no e-mail viram <img src=attachment.freshdesk.com/inline/...> (ADR-035).
+    html = (
+        "<div>Segue o erro:<br>"
+        '<img src="https://attachment.freshdesk.com/inline/attachment?token=AAA&amp;x=1"><br>'
+        '<img src="https://attachment.freshdesk.com/inline/attachment?token=BBB">'
+        '<img src="https://logo.externo.com/assinatura.png">'  # externo (assinatura) -> ignorado
+        "</div>"
+    )
+    ticket = TicketFreshdesk.from_freshdesk({**TICKET_BASE, "description": html})
+
+    assert ticket.imagens_inline == [
+        "https://attachment.freshdesk.com/inline/attachment?token=AAA&x=1",  # &amp; desescapado
+        "https://attachment.freshdesk.com/inline/attachment?token=BBB",
+    ]
+
+
+@respx.mock
+async def test_baixar_imagem_inline_sem_auth_com_content_type():
+    url = "https://attachment.freshdesk.com/inline/attachment?token=JWT"
+    respx.get(url).mock(
+        return_value=httpx.Response(
+            200, content=b"PNGDATA", headers={"content-type": "image/png; x"}
+        )
+    )
+
+    async with FreshdeskClient(_settings()) as fd:
+        dados, tipo = await fd.baixar_imagem(url)
+
+    assert dados == b"PNGDATA"
+    assert tipo == "image/png"  # só o mime, sem o "; x"
+
+
 # --- mapeamento de prioridade (sem HTTP) -----------------------------------
 
 
