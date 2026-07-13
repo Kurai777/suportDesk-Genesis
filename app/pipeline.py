@@ -43,10 +43,28 @@ class Decisao(StrEnum):
 # --- decisão (função PURA, sem I/O) ----------------------------------------
 
 
-def decidir(resultado: ResultadoChamado, confianca_minima: str) -> Decisao:
-    """Resolver quando encontrou_solucao=true E confiança >= mínimo; senão, escalar."""
+def decidir(
+    resultado: ResultadoChamado,
+    confianca_minima: str,
+    *,
+    melhor_distancia: float | None,
+    distancia_maxima: float,
+) -> Decisao:
+    """Decide RESOLVER × ESCALAR cruzando o auto-relato do Claude com um sinal OBJETIVO.
+
+    RESOLVE só quando TODAS valem: o Claude achou solução, a confiança dele >= mínima E a
+    recuperação é objetivamente próxima — o melhor par local a uma distância <= `distancia_maxima`
+    (guardrail da ADR-030). NUNCA confia só na autoavaliação do modelo: um match distante (ex.: o
+    #4446, doc de NFSE a ~0,46 para uma NF de entrada) escala mesmo com o Claude dizendo "alta".
+    Sem par recuperado (`melhor_distancia is None`), escala — não há como confirmar objetivamente.
+    """
     r = resultado.resposta
-    if r.encontrou_solucao and _atende_minimo(r.confianca, confianca_minima):
+    if (
+        r.encontrou_solucao
+        and _atende_minimo(r.confianca, confianca_minima)
+        and melhor_distancia is not None
+        and melhor_distancia <= distancia_maxima
+    ):
         return Decisao.RESOLVIDO
     return Decisao.ESCALAR
 
@@ -207,7 +225,14 @@ async def inspecionar(
     resultado = ResultadoChamado(
         ticket_id=ticket.id, empresa=ticket.empresa, resposta=resposta
     )
-    decisao = decidir(resultado, settings.confianca_minima)
+    # Guardrail de distância (ADR-030): o melhor (menor) par recuperado é o sinal objetivo.
+    melhor_distancia = min((p.distancia for p in pares), default=None)
+    decisao = decidir(
+        resultado,
+        settings.confianca_minima,
+        melhor_distancia=melhor_distancia,
+        distancia_maxima=settings.distancia_maxima_confiavel,
+    )
 
     # ÚLTIMO RECURSO: só se escalou por FALTA DE CONTEXTO e a flag está ligada.
     # Pedido operacional NÃO vai à web — é execução humana, não uma dúvida pesquisável.

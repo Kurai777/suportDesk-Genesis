@@ -214,7 +214,35 @@ def _resultado(encontrou, confianca):
     ],
 )
 def test_decidir(encontrou, confianca, minimo, esperado):
-    assert decidir(_resultado(encontrou, confianca), minimo) is esperado
+    # Distância boa (0,1 <= 0,40): isola a dimensão de CONFIANÇA. O guardrail é testado à parte.
+    assert (
+        decidir(
+            _resultado(encontrou, confianca),
+            minimo,
+            melhor_distancia=0.1,
+            distancia_maxima=0.40,
+        )
+        is esperado
+    )
+
+
+@pytest.mark.parametrize(
+    "distancia,esperado",
+    [
+        (0.31, Decisao.RESOLVIDO),  # match bom, bem abaixo do limiar
+        (0.40, Decisao.RESOLVIDO),  # exatamente no limiar (<=)
+        (0.4017, Decisao.ESCALAR),  # logo acima do limiar
+        (0.4617, Decisao.ESCALAR),  # #4446: doc de NFSE p/ NF de ENTRADA — match distante
+        (None, Decisao.ESCALAR),  # nenhum par recuperado -> sem confirmação objetiva
+    ],
+)
+def test_decidir_guardrail_distancia_supera_autoavaliacao(distancia, esperado):
+    # O Claude disse encontrou=True / confiança "alta", mas a DISTÂNCIA objetiva decide (ADR-030).
+    resultado = _resultado(encontrou=True, confianca="alta")
+    assert (
+        decidir(resultado, "alta", melhor_distancia=distancia, distancia_maxima=0.40)
+        is esperado
+    )
 
 
 # --- fluxo resolvido -------------------------------------------------------
@@ -472,6 +500,36 @@ async def test_inspecionar_escalar(settings):
     assert "⚠️ IA não encontrou solução na base" in insp.nota
     assert "🔴 Chamado #101" in insp.whatsapp
     assert insp.query_web == ""  # web desligada -> nada foi pesquisado na web
+
+
+async def test_inspecionar_guardrail_distancia_escala_apesar_de_alta(settings):
+    # Caso #4446: o Claude diz encontrou=True / "alta", mas o melhor par local está a 0,46
+    # (doc de NFSE para uma NF de entrada). O guardrail de distância força ESCALAR (ADR-030).
+    par_distante = Similar(None, "p", "s", None, 0.4617, fonte="documentacao", titulo="NFSE")
+
+    insp = await inspecionar(
+        _ticket(),
+        settings=settings,  # busca_web desligada na fixture -> não mascara com a web
+        rag_service=FakeRag([par_distante]),
+        claude=FakeClaude(resposta=_resposta(encontrou=True, confianca="alta")),
+    )
+
+    assert insp.decisao is Decisao.ESCALAR
+    assert "⚠️ IA não encontrou solução na base" in insp.nota
+
+
+async def test_inspecionar_resolve_quando_par_esta_dentro_do_limiar(settings):
+    # Contraprova: mesma confiança "alta", mas par a 0,39 (<= 0,40) -> RESOLVIDO.
+    par_perto = Similar(None, "p", "s", None, 0.39, fonte="documentacao", titulo="doc")
+
+    insp = await inspecionar(
+        _ticket(),
+        settings=settings,
+        rag_service=FakeRag([par_perto]),
+        claude=FakeClaude(resposta=_resposta(encontrou=True, confianca="alta")),
+    )
+
+    assert insp.decisao is Decisao.RESOLVIDO
 
 
 async def test_inspecionar_aciona_web_e_expoe_pares_web(settings):

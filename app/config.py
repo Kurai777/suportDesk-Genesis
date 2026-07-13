@@ -78,6 +78,11 @@ class Settings(BaseSettings):
 
     # --- Regra de negócio ---
     confianca_minima: str = "alta"
+    # Guardrail de distância (ADR-030): só RESOLVE se o melhor par recuperado estiver a uma
+    # distância de cosseno <= este limiar. Cruza o auto-relato do Claude com um sinal OBJETIVO —
+    # match distante (ex.: doc de NFSE para uma NF de entrada, ~0,46) escala mesmo com "alta".
+    # Calibrável com dados; um bom match fica ~0,31, os medíocres a partir de ~0,45.
+    distancia_maxima_confiavel: float = 0.40
 
     def telefone_responsavel(self, agente_id: int | None) -> str:
         """Resolve o telefone do responsável (agente -> telefone), com fallback.

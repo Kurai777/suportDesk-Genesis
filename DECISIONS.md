@@ -796,3 +796,37 @@ Um módulo só é considerado PRONTO quando:
   `destino_notificacao` prefere o grupo e cai no telefone quando vazio; `enviar` manda o JID intacto
   no corpo; `listar_grupos` parseia jid+nome e descarta grupo sem id; pipeline com grupo configurado
   notifica o grupo (mantendo a atribuição ao responsável). **184 passando, ruff limpo.**
+
+## ADR-030 — Guardrail de distância na decisão (não confiar só na autoavaliação do Claude)
+
+- **Achado (validação em chamado real, #4446):** o chamado "NF DE ENTRADA não transmitida à SEFAZ"
+  (nota de MERCADORIA/entrada) voltou `RESOLVIDO / confiança alta`, mas a base recuperou documentos
+  de **NFSE — nota de SERVIÇO** (melhor par a **0,4617**; um bom match fica ~0,31) e o rascunho
+  misturou campos de ISS (B1_CODISS, "espécie NFS") que não se aplicam. É o **"caso quase-igual"**: a
+  base não tinha a resposta, recuperou o parecido, e o modelo respondeu confiante. O copiloto (revisão
+  humana) segurou — mas o sinal de decisão estava errado.
+- **Causa:** `decidir` confiava só em `encontrou_solucao` + `confianca` (ambos AUTORRELATADOS pelo
+  Claude). Não olhava nenhum sinal OBJETIVO da recuperação. Distância ruim (0,46+) não pesava.
+- **Decisão — guardrail de distância:** `decidir` passa a receber a **menor distância** entre os pares
+  recuperados e um limiar `distancia_maxima`. Só RESOLVE se, além de encontrou+confiança, o melhor par
+  estiver a uma distância `<= distancia_maxima`. Match distante → ESCALAR, mesmo com "alta". Sem par
+  (`None`) → ESCALAR. A função continua PURA e testável; o pipeline calcula `min(p.distancia ...)` e
+  injeta. Web não é afetada (pares web têm distância-sentinela; a decisão web é separada e "menos
+  verificada").
+- **Limiar configurável:** `DISTANCIA_MAXIMA_CONFIAVEL` (default **0,40**, alinhado ao limiar 0,40 já
+  discutido no COLETA.md). Calibrável com dados; menor = mais rígido.
+- **Efeito no #4446:** agora `ESCALAR` (encontrou=True/alta do Claude, mas melhor par 0,4617 > 0,40).
+  O rascunho segue visível na nota interna (rotulado), para o revisor decidir — filosofia copiloto.
+- **Medição em lote (18 chamados reais, busca web OFF para isolar a decisão local,
+  `scripts/inspecionar_chamado.py`):** com o guardrail, **3 RESOLVER / 15 ESCALAR**, e **4 chamados
+  rebaixados** de RESOLVER→ESCALAR — TODOS fiscais de NF onde o Claude dizia "alta" mas o melhor par
+  estava a 0,43–0,56 (mesmo padrão do #4446). Os que seguiram RESOLVER tinham par ~0,36–0,39
+  (match real). Números para calibrar o limiar depois; a taxa de acerto humana será classificada
+  sobre este lote.
+- **`scripts/inspecionar_chamado.py`:** promovido de scratchpad — audita QUALQUER chamado real pelo
+  pipeline em modo inspeção (sem escrever), mostrando decisão, distância do melhor par e rascunho.
+  `python -m scripts.inspecionar_chamado 4446 [--raw]`.
+- **Testes:** `decidir` reparametrizado (distância boa isola a dimensão de confiança); casos do
+  guardrail incluindo o **#4446 explícito** (0,4617 → ESCALAR), o limiar exato (0,40 → RESOLVER), logo
+  acima (0,4017 → ESCALAR) e sem par (None → ESCALAR); no nível do `inspecionar`, par distante escala
+  apesar de "alta" e par dentro do limiar resolve. **191 passando, ruff limpo.**

@@ -65,7 +65,13 @@ async def main() -> None:
 
         resposta = await claude.gerar_resposta(problema, pares)
         resultado = ResultadoChamado(ticket_id=0, empresa="(smoke-test)", resposta=resposta)
-        decisao = decidir(resultado, settings.confianca_minima)
+        melhor_distancia = min((p.distancia for p in pares), default=None)
+        decisao = decidir(
+            resultado,
+            settings.confianca_minima,
+            melhor_distancia=melhor_distancia,
+            distancia_maxima=settings.distancia_maxima_confiavel,
+        )
 
         print(f"\n=== DECISÃO: {decisao.value.upper()} ===")
         print("\n=== ResultadoChamado ===")
