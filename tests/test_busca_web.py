@@ -73,7 +73,7 @@ async def test_buscar_extrai_texto_das_paginas():
     assert trechos[0].startswith("[https://centraldeatendimento.totvs.com/artigo-289]")
 
 
-async def test_query_restrita_aos_dominios_oficiais():
+async def test_query_restrita_aos_dominios_da_allowlist():
     buscador = FakeBuscador([])
     client = BuscaWebClient(buscador=buscador, fetcher=FakeFetcher({}))
 
@@ -81,8 +81,10 @@ async def test_query_restrita_aos_dominios_oficiais():
 
     assert len(buscador.queries) == 1
     query = buscador.queries[0]
-    assert "site:centraldeatendimento.totvs.com" in query
-    assert "site:tdn.totvs.com" in query
+    assert "site:centraldeatendimento.totvs.com" in query  # oficial
+    assert "site:tdn.totvs.com" in query  # oficial
+    assert "site:blacktdn.com.br" in query  # referência da comunidade (ADR-038)
+    assert "site:userfunction.com.br" in query
     assert query.endswith(_DOMINIOS)
 
 

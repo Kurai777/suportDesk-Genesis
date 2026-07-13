@@ -1,9 +1,10 @@
-"""Busca web como ÚLTIMO RECURSO (ADR-015), restrita aos domínios oficiais TOTVS.
+"""Busca web como ÚLTIMO RECURSO (ADR-015/038), restrita a domínios TOTVS/Protheus confiáveis.
 
 Só é acionada pelo pipeline quando a base local (chamados + docs) NÃO resolveu — nunca
-antes. Consulta o DuckDuckGo (via `ddgs`) limitando a busca aos dois domínios oficiais,
-abre os 2–3 primeiros resultados e extrai o texto principal de cada página (trafilatura).
-Esse texto extraído é o que vira <contexto> para o Claude.
+antes. Consulta o DuckDuckGo (via `ddgs`) limitando a busca aos domínios da allowlist:
+os OFICIAIS TOTVS (Central de Atendimento, TDN) + REFERÊNCIAS TÉCNICAS da comunidade Protheus
+que o time considera confiáveis (BlackTDN, UserFunction, etc. — ADR-038). Abre os 2–3 primeiros
+resultados e extrai o texto principal de cada página (trafilatura). Esse texto vira <contexto>.
 
 BEST-EFFORT: qualquer falha (rate limit, bloqueio de IP, página fora do ar, timeout,
 HTML sem conteúdo) devolve lista vazia SEM levantar exceção — a busca web nunca pode
@@ -37,8 +38,17 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 logger = logging.getLogger(__name__)
 
-# Domínios oficiais TOTVS — a busca é restrita a eles (operador site: do buscador).
-_DOMINIOS = "site:centraldeatendimento.totvs.com OR site:tdn.totvs.com"
+# Allowlist da busca (operador site:): oficiais TOTVS + referências técnicas da comunidade
+# Protheus consideradas confiáveis pelo time (ADR-038). A busca é restrita a estes domínios.
+_DOMINIOS_OFICIAIS = ("centraldeatendimento.totvs.com", "tdn.totvs.com")
+_DOMINIOS_COMUNIDADE = (
+    "userfunction.com.br",
+    "terminaldeinformacao.com",
+    "rfbsistemas.com.br",
+    "blacktdn.com.br",
+    "udesenv.com.br",
+)
+_DOMINIOS = " OR ".join(f"site:{d}" for d in _DOMINIOS_OFICIAIS + _DOMINIOS_COMUNIDADE)
 
 _MAX_RESULTADOS = 3  # abre no máx. os 3 primeiros resultados
 _MAX_CHARS_QUERY = 240  # a query do buscador não precisa do chamado inteiro

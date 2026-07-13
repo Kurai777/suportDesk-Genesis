@@ -109,8 +109,8 @@ def _motivo_equipe(r: RespostaIA) -> str:
 def _nota(decisao: Decisao, r: RespostaIA, *, via_web: bool = False) -> str:
     if decisao is Decisao.RESOLVIDO:
         origem = (
-            "🌐 Rascunho gerado a partir de BUSCA WEB em site oficial TOTVS "
-            "(fonte MENOS verificada — confira a fonte e revise com atenção redobrada)."
+            "🌐 Rascunho gerado a partir de BUSCA WEB em referência técnica TOTVS/Protheus "
+            "(confira a fonte no rodapé do trecho e revise antes de enviar)."
             if via_web
             else "🤖 Rascunho gerado por IA (revisar antes de enviar)."
         )
@@ -126,7 +126,9 @@ def _nota(decisao: Decisao, r: RespostaIA, *, via_web: bool = False) -> str:
     # ESCALAR: para o TIME. Linha de status TÉCNICA (verdade) + resumo; e o rascunho de
     # acolhimento ao cliente, para o agente revisar e enviar (só a resposta_cliente é
     # "cliente-friendly"; o status acima segue cru). Alçada admin sem solução é sinalizada.
-    extra = " (a busca web em sites oficiais TOTVS também não trouxe solução)" if via_web else ""
+    extra = (
+        " (a busca web em referências TOTVS/Protheus também não trouxe solução)" if via_web else ""
+    )
     admin = f" Envolve ALÇADA ADMIN{_rotulo_alcada(r)}." if r.alcada_admin else ""
     return (
         f"⚠️ IA não encontrou solução na base{extra}. Requer análise manual.{admin}\n\n"
@@ -180,12 +182,12 @@ def _pares_web(trechos: list[str]) -> list[Similar]:
     return [
         Similar(
             ticket_id=None,
-            problema="Trecho recuperado por busca web em site oficial TOTVS",
+            problema="Trecho recuperado por busca web em referência técnica TOTVS/Protheus",
             solucao=trecho,
             empresa=None,
-            distancia=1.0,  # sem vetor: distância máxima (fonte "distante"/menos confiável)
+            distancia=1.0,  # sentinela: sem vetor (o guardrail de distância não se aplica à web)
             fonte="web_totvs",
-            titulo="Site oficial TOTVS (busca web)",
+            titulo="Referência técnica TOTVS/Protheus (busca web)",
         )
         for trecho in trechos
     ]

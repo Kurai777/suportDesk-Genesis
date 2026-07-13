@@ -986,3 +986,25 @@ Um módulo só é considerado PRONTO quando:
 - **Testes (mock, zero rede):** PDF vai como bloco `document` (não `image`); tipo não suportado
   (ex.: zip) não chama o modelo; `_incorporar_imagens` lê o PDF anexo e concatena à busca.
   **205 passando, ruff limpo.** (Verificação ao vivo pendente de um chamado real com PDF.)
+
+## ADR-038 — Referências técnicas da comunidade Protheus na busca web
+
+- **Pedido:** ampliar a busca web para além dos domínios oficiais TOTVS, incluindo blogs técnicos
+  reconhecidos da comunidade Protheus onde o time acha soluções (ADVPL, pontos de entrada, erros).
+  O usuário indicou tratá-los como fonte confiável ("não é um site qualquer").
+- **Allowlist ampliada (`busca_web._DOMINIOS`):** oficiais (`centraldeatendimento.totvs.com`,
+  `tdn.totvs.com`) + comunidade: `userfunction.com.br`, `terminaldeinformacao.com`,
+  `rfbsistemas.com.br`, `blacktdn.com.br`, `udesenv.com.br`. O 6º indicado, `fbsolutions.com.br`,
+  foi DESCARTADO — não resolve no DNS (domínio fora do ar). O `forum.tdn.totvs.com` que eu havia
+  sugerido também não existe; conteúdo do TDN já é coberto por `site:tdn.totvs.com`.
+- **Confiança:** tratadas como fonte confiável (decisão do usuário, com o copiloto revisando tudo).
+  Removido o teto "confianca no máximo média" para web (regra 5 do SYSTEM_PROMPT) — o conteúdo web
+  vale a confiança que merece. A REGRA DE OURO permanece: só responde com o que está no <contexto>,
+  nada inventado; e a regra 4 mantém a doc OFICIAL na frente em caso de conflito.
+- **Honestidade factual nos rótulos:** os blogs NÃO são rotulados como "site oficial TOTVS" (seria
+  falso). O rótulo de fonte virou "referência técnica TOTVS/Protheus (oficial ou comunidade)"; a URL
+  real de cada trecho continua no rodapé, para o revisor rastrear. Notas/prompt atualizados.
+- **Verificado ao vivo:** busca por "pontos de entrada ADVPL" trouxe
+  `terminaldeinformacao.com/advpl-pontos-de-entrada/` junto da Central oficial.
+- **Testes:** a query inclui os domínios da comunidade (blacktdn, userfunction) além dos oficiais.
+  **205 passando, ruff limpo.**

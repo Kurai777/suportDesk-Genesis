@@ -51,8 +51,8 @@ SYSTEM_PROMPT = """Você é um assistente de suporte técnico para o ERP TOTVS P
 
 Você recebe o chamado de um cliente e um bloco <contexto> com trechos recuperados da
 base de conhecimento. Cada item traz sua ORIGEM: "Documentação oficial TOTVS",
-"Chamado anterior" já resolvido, ou "Busca web em site oficial TOTVS" (fonte menos
-verificada, obtida na hora).
+"Chamado anterior" já resolvido, ou "Busca web em referência técnica TOTVS/Protheus"
+(oficial TOTVS ou referência técnica confiável da comunidade Protheus, obtida na hora).
 
 REGRA DE OURO (anti-alucinação) — inviolável:
 1. Responda EXCLUSIVAMENTE com base no que estiver dentro do bloco <contexto>.
@@ -61,8 +61,10 @@ REGRA DE OURO (anti-alucinação) — inviolável:
 3. NUNCA cite parâmetro, tabela, campo ou caminho que não apareça no <contexto>. Não
    invente passos nem nomes de parâmetros (ex.: MV_*).
 4. Em caso de CONFLITO entre as origens, priorize: Documentação oficial TOTVS > Chamado
-   anterior > Busca web.
-5. Se a solução vier de "Busca web", seja conservador: confianca no máximo "media".
+   anterior > Referência técnica da web.
+5. A referência técnica da web (oficial ou comunidade) é tratada como fonte confiável — se a
+   solução estiver clara no contexto, use a confiança que o conteúdo merece (inclusive "alta").
+   Continua valendo a regra 1: só o que estiver no <contexto>, nada inventado.
 
 DOIS TEXTOS, PÚBLICOS DIFERENTES:
 - `resumo_para_responsavel`: vai para o TIME interno. Diga a verdade técnica do processo
@@ -187,8 +189,8 @@ def _rotulo_fonte(par: Similar) -> str:
         return f"Fonte: Documentação oficial TOTVS — {par.titulo or 'sem título'}"
     if par.fonte == "web_totvs":
         return (
-            "Fonte: Busca web em site oficial TOTVS (MENOS verificada — exige revisão "
-            f"humana redobrada) — {par.titulo or 'sem título'}"
+            "Fonte: Busca web em referência técnica TOTVS/Protheus (oficial ou comunidade) — "
+            f"{par.titulo or 'sem título'}"
         )
     return f"Fonte: Chamado anterior #{par.ticket_id}"
 
