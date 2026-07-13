@@ -119,13 +119,14 @@ async function processar(){
     const web = d.via_web ? '<span class="badge web">via BUSCA WEB</span>' : '';
     const oper = d.pedido_operacional ? '<span class="badge web">🔧 PEDIDO OPERACIONAL</span>' : '';
     const admin = d.alcada_admin ? '<span class="badge alcada_admin">🔧 ADMIN'+(d.tipo_alcada?' ('+esc(d.tipo_alcada)+')':'')+' — vai à equipe</span>' : '';
+    const auto = d.auto_elegivel ? '<span class="badge resolvido">🤖 AUTO-ELEGÍVEL (recorte Fase 2 — não enviado)</span>' : '';
     const meta = 'confiança: '+esc(d.confianca)+' · encontrou_solução: '+d.encontrou_solucao
       +' · pedido_operacional: '+d.pedido_operacional
       +' · urgência: '+esc(d.urgencia)+' · empresa: '+esc(d.empresa);
     let html = ''
       + '<div class="sec"><h3>Decisão</h3>'
       +   '<span class="badge '+cls+'">'+rotulo+'</span> '
-      +   '<span class="muted">'+meta+'</span> '+web+' '+oper+' '+admin+'</div>'
+      +   '<span class="muted">'+meta+'</span> '+web+' '+oper+' '+admin+' '+auto+'</div>'
       + '<div class="sec"><h3>Query enviada ao RAG</h3>'
       +   (d.query === d.problema
             ? '<p class="muted">(sem reformulação — buscou o texto limpo do chamado)</p>'

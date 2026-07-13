@@ -14,6 +14,7 @@ from app.pipeline import (
     Inspecao,
     _incorporar_imagens,
     decidir,
+    elegivel_auto,
     inspecionar,
     processar,
 )
@@ -296,6 +297,45 @@ def test_decidir_sem_admin_sem_tarefa_e_match_distante_escala():
     resultado = _resultado(encontrou=True, confianca="alta", alcada_admin=False)
     d = decidir(resultado, "alta", melhor_distancia=0.47, distancia_maxima=0.40)
     assert d is Decisao.ESCALAR
+
+
+# --- recorte de auto-resposta (ADR-041): MARCADOR de medição, NÃO envia nada ----------
+
+
+def _insp_auto(decisao, confianca="alta", dist=0.30, via_web=False):
+    return Inspecao(
+        problema="p",
+        query="p",
+        pares=[Similar(1, "p", "s", "E", dist)],
+        resposta=_resposta(encontrou=(decisao is Decisao.RESOLVIDO), confianca=confianca),
+        decisao=decisao,
+        via_web=via_web,
+    )
+
+
+def test_elegivel_auto_resolvido_alta_e_match_perto():
+    assert elegivel_auto(_insp_auto(Decisao.RESOLVIDO, "alta", dist=0.30), 0.40) is True
+
+
+def test_elegivel_auto_recusa_escalar_e_alcada_admin():
+    assert elegivel_auto(_insp_auto(Decisao.ESCALAR), 0.40) is False
+    assert elegivel_auto(_insp_auto(Decisao.ALCADA_ADMIN), 0.40) is False
+
+
+def test_elegivel_auto_recusa_confianca_nao_alta():
+    assert elegivel_auto(_insp_auto(Decisao.RESOLVIDO, "media", dist=0.30), 0.40) is False
+
+
+def test_elegivel_auto_recusa_resolvido_local_com_match_distante():
+    # RESOLVIDO local mas par > limiar (só possível se veio pela web; local seria escalado).
+    insp = _insp_auto(Decisao.RESOLVIDO, "alta", dist=0.45, via_web=False)
+    assert elegivel_auto(insp, 0.40) is False
+
+
+def test_elegivel_auto_aceita_web_mesmo_com_par_local_distante():
+    # Web é elegível (decisão do usuário): via_web passa mesmo com o par local distante.
+    insp = _insp_auto(Decisao.RESOLVIDO, "alta", dist=0.50, via_web=True)
+    assert elegivel_auto(insp, 0.40) is True
 
 
 # --- fluxo resolvido -------------------------------------------------------

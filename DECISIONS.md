@@ -1033,3 +1033,26 @@ Um módulo só é considerado PRONTO quando:
 - **Decisão:** uma linha no SYSTEM_PROMPT (seção resposta_cliente): se a solução envolve baixar/
   acessar algo, INCLUA o link/caminho — mas SOMENTE se estiver no <contexto> (regra de ouro: não
   inventar link). Aproveita que os trechos da busca web já trazem a URL no rodapé.
+
+## ADR-041 — Recorte de AUTO-RESPOSTA: marcador de medição (Fase 2 não ligada)
+
+- **Contexto:** a regra inviolável nº 1 (CLAUDE.md) PROÍBE resposta pública automática na Fase 1;
+  a Fase 2 (auto-resposta) só depois de MEDIR a taxa de acerto. Três lotes de auditoria humana
+  mostraram o lane RESOLVIDO consistentemente correto (as falhas foram buracos de LEITURA —
+  imagem inline, .txt — já corrigidos), o que sustenta desenhar o recorte seguro.
+- **Decisão — MARCADOR, não envio:** `pipeline.elegivel_auto(insp, limiar)` (função pura) diz se um
+  chamado SERIA candidato a resposta automática, sem enviar nada. O pipeline segue COPILOTO (nota +
+  atribuição + WhatsApp). O flag existe para MEDIR: quantos % caem no recorte e se acertam 100%.
+- **Critério (definido com o usuário, recorte LARGO para medir):** decisão RESOLVIDO + confiança
+  "alta" + (melhor par <= `LIMIAR_AUTO_RESPOSTA`, default 0,40 OU resposta veio da busca web). O
+  usuário optou por incluir a web e usar o mesmo 0,40 do guardrail — seguro porque é só medição;
+  se os candidatos web (ex.: #4422) errarem na classificação, aperta-se ANTES da Fase 2.
+- **Exposto para medição:** `TesteResposta.auto_elegivel` + badge no `/teste` e no painel de
+  auditoria (tile "auto-elegíveis" + tag por card). A régua de classificação foca nesses: são os
+  que um dia responderiam sem revisão.
+- **Fase 2 (futuro, fora deste commit):** quando os auto-elegíveis provarem acerto em volume, um flag
+  `RESPOSTA_AUTOMATICA_ATIVA` (default off) ligaria o envio público SÓ para eles — a única saída
+  autorizada do copiloto. Requer a peça nova `freshdesk.responder_publico()`.
+- **Testes:** RESOLVIDO+alta+perto → elegível; ESCALAR/ALÇADA_ADMIN → não; confiança não-alta → não;
+  RESOLVIDO local distante → não; web distante → elegível (decisão do usuário). **211 passando,
+  ruff limpo.**

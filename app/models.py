@@ -202,6 +202,7 @@ class TesteResposta(BaseModel):
     resumo_para_responsavel: str
     urgencia: str
     via_web: bool  # se a busca web foi acionada
+    auto_elegivel: bool  # candidato a resposta automática (recorte ADR-041) — só marcador
     query_web: str  # a query REAL enviada aos domínios TOTVS ("" = web não acionada)
     nota: str  # nota interna que SERIA criada no Freshdesk
     whatsapp: str  # mensagem que SERIA enviada no WhatsApp

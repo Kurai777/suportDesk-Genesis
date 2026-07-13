@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     # match distante (ex.: doc de NFSE para uma NF de entrada, ~0,46) escala mesmo com "alta".
     # Calibrável com dados; um bom match fica ~0,31, os medíocres a partir de ~0,45.
     distancia_maxima_confiavel: float = 0.40
+    # Recorte de AUTO-RESPOSTA (ADR-041): limiar de distância para um RESOLVIDO ser candidato a
+    # resposta automática (Fase 2). Hoje é só um MARCADOR de medição — nada é enviado (Fase 1
+    # copiloto). Default = mesmo do guardrail; aperte com dados antes de ligar a Fase 2.
+    limiar_auto_resposta: float = 0.40
 
     def telefone_responsavel(self, agente_id: int | None) -> str:
         """Resolve o telefone do responsável (agente -> telefone), com fallback.

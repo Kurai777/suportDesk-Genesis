@@ -240,6 +240,21 @@ class Inspecao:
     whatsapp: str = ""  # mensagem que SERIA enviada no WhatsApp
 
 
+def elegivel_auto(insp: Inspecao, limiar_auto: float) -> bool:
+    """MARCADOR do recorte de auto-resposta (ADR-041) — NÃO envia nada (Fase 1 é copiloto).
+
+    Diz se um chamado SERIA candidato a resposta automática ao cliente (Fase 2), para MEDIR.
+    Critério (definido com o usuário): decisão RESOLVIDO, confiança "alta", e o match é próximo
+    (melhor par <= `limiar_auto`) OU a resposta veio da busca web. Só marca; virar a Fase 2
+    depende da medição humana provar que os candidatos acertam.
+    """
+    if insp.decisao is not Decisao.RESOLVIDO or insp.resposta.confianca != "alta":
+        return False
+    melhor = min((p.distancia for p in insp.pares), default=None)
+    perto = melhor is not None and melhor <= limiar_auto
+    return perto or insp.via_web
+
+
 async def _query_de_busca(
     problema: str, *, claude: ClaudeClient, settings: Settings
 ) -> str:
