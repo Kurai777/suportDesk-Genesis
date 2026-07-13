@@ -865,3 +865,25 @@ Um módulo só é considerado PRONTO quando:
   ALÇADA_ADMIN; admin sem solução nem tarefa → ESCALAR. `inspecionar` — grupo recebe a direção/brief e
   o cliente o acolhimento. `claude_client` — alçada admin força a saudação mesmo com solução, e
   preserva a direção em `resumo`. **198 passando, ruff limpo.**
+
+## ADR-032 — Saneamento do texto ao cliente guiado pela DECISÃO (fecha o furo do guardrail)
+
+- **Bug (achado ao classificar o lote):** nos ESCALAR que o guardrail de distância (ADR-030)
+  rebaixou a partir de um `encontrou=true` (ex.: **#4446**, NFSE para NF de entrada; **#4438**), o
+  `resposta_cliente` continha a resposta técnica COMPLETA — às vezes ERRADA. A nota interna a
+  exibia como "Rascunho de acolhimento ao cliente", e um agente poderia enviá-la. Vazamento real do
+  copiloto.
+- **Causa:** o saneamento (`_acolhimento_padrao_se_escala`, no claude_client) decide por sinais
+  POR-FONTE — `not encontrou OU alcada_admin` — que NÃO enxergam a distância. O guardrail escala pela
+  distância DEPOIS, no pipeline; o saneamento por-fonte não cobre esse caso.
+- **Decisão — ponto final guiado pela DECISÃO:** no `inspecionar`, após a decisão final (inclusive
+  o desfecho da busca web), se `decisao is not RESOLVIDO`, força `resposta_cliente =
+  RESPOSTA_ESCALAR_PADRAO`. O cliente só recebe o texto do modelo no RESOLVIDO; em ESCALAR e
+  ALÇADA_ADMIN, sempre a saudação. A verdade técnica (mesmo a de baixa confiança) permanece em
+  `resumo_para_responsavel`, para o revisor humano.
+- **Defesa em profundidade:** o saneamento por-fonte do claude_client fica (cobre a origem); este é
+  a garantia FINAL, onde a decisão já é conhecida. Prova ao vivo (#4446): rascunho ao cliente vira a
+  saudação; o conteúdo de NFSE (domínio errado) fica só no resumo do time.
+- **Testes:** guardrail que escala `encontrou=true` → cliente recebe a saudação, texto do modelo não
+  vaza; escalar/pedido-operacional → nota traz a saudação-padrão + verdade técnica. **198 passando,
+  ruff limpo.**

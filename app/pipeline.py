@@ -15,7 +15,7 @@ from enum import StrEnum
 import psycopg
 
 from app.busca_web import BuscaWebClient, montar_query_web
-from app.claude_client import ClaudeClient
+from app.claude_client import RESPOSTA_ESCALAR_PADRAO, ClaudeClient
 from app.config import Settings
 from app.freshdesk import FreshdeskClient
 from app.models import EMPRESA_DESCONHECIDA, RespostaIA, ResultadoChamado, TicketFreshdesk
@@ -292,6 +292,14 @@ async def inspecionar(
         resposta, decisao, via_web, pares_web = await _tentar_busca_web(
             problema, ticket.id, resposta, decisao, busca_web=busca_web, claude=claude
         )
+
+    # GARANTIA FINAL, guiada pela DECISÃO (ADR-032): o cliente só recebe a solução no RESOLVIDO.
+    # Em qualquer outra decisão — inclusive quando o guardrail de distância (ADR-030) escala um
+    # `encontrou=true` (ex.: #4446/#4438) — a resposta ao cliente é a saudação-padrão. O
+    # saneamento do claude_client é por-fonte (encontrou/alcada) e NÃO enxerga a distância;
+    # este é o ponto que fecha o furo, porque aqui a decisão final já é conhecida.
+    if decisao is not Decisao.RESOLVIDO and resposta.resposta_cliente != RESPOSTA_ESCALAR_PADRAO:
+        resposta = resposta.model_copy(update={"resposta_cliente": RESPOSTA_ESCALAR_PADRAO})
 
     return Inspecao(
         problema=problema,

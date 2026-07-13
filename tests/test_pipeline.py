@@ -7,6 +7,7 @@ resolvido, o fluxo escalar e o fallback quando o miolo falha.
 
 import pytest
 
+from app.claude_client import RESPOSTA_ESCALAR_PADRAO
 from app.models import Anexo, Requester, RespostaIA, ResultadoChamado, TicketFreshdesk
 from app.pipeline import (
     Decisao,
@@ -551,11 +552,16 @@ async def test_inspecionar_guardrail_distancia_escala_apesar_de_alta(settings):
         _ticket(),
         settings=settings,  # busca_web desligada na fixture -> não mascara com a web
         rag_service=FakeRag([par_distante]),
-        claude=FakeClaude(resposta=_resposta(encontrou=True, confianca="alta")),
+        claude=FakeClaude(
+            resposta=_resposta(encontrou=True, confianca="alta", cliente="Altere o MV_ATFMOED.")
+        ),
     )
 
     assert insp.decisao is Decisao.ESCALAR
     assert "⚠️ IA não encontrou solução na base" in insp.nota
+    # ADR-032: guardrail escalou um "encontrou=true" -> o cliente NÃO recebe a resposta técnica.
+    assert insp.resposta.resposta_cliente == RESPOSTA_ESCALAR_PADRAO
+    assert "MV_ATFMOED" not in insp.resposta.resposta_cliente  # o texto do modelo não vaza
 
 
 async def test_inspecionar_resolve_quando_par_esta_dentro_do_limiar(settings):
@@ -705,36 +711,30 @@ async def test_resolver_entrega_solucao_direta_ao_cliente(settings):
 
 
 async def test_escalar_acolhe_cliente_mas_nota_mantem_verdade_tecnica(settings):
-    acolhe = "Seu chamado está sendo analisado pelo nosso time e retornaremos em breve."
     insp = await inspecionar(
         _ticket(),
         settings=settings,
         rag_service=FakeRag([]),
-        claude=FakeClaude(
-            resposta=_resposta(encontrou=False, confianca="baixa", cliente=acolhe)
-        ),
+        claude=FakeClaude(resposta=_resposta(encontrou=False, confianca="baixa")),
     )
 
     assert insp.decisao is Decisao.ESCALAR
     # Nota (TIME): verdade técnica crua...
     assert "⚠️ IA não encontrou solução na base" in insp.nota
     assert "Requer análise manual" in insp.nota
-    # ...e o rascunho de ACOLHIMENTO para o agente enviar ao cliente.
-    assert acolhe in insp.nota
-    assert insp.resposta.resposta_cliente == acolhe
+    # ...e o rascunho de ACOLHIMENTO (a saudação-padrão) para o agente enviar ao cliente.
+    assert RESPOSTA_ESCALAR_PADRAO in insp.nota
+    assert insp.resposta.resposta_cliente == RESPOSTA_ESCALAR_PADRAO
 
 
 async def test_pedido_operacional_acolhe_escala_e_nao_vai_a_web(settings):
     web = FakeBuscaWeb(trechos=["não deveria ser usado"])
-    acolhe = "Olá! Vamos providenciar o cadastro e retornamos assim que concluído."
     insp = await inspecionar(
         _ticket(),
         settings=_settings_web_on(settings),  # web LIGADA, mas pedido operacional não usa
         rag_service=FakeRag([]),
         claude=FakeClaude(
-            resposta=_resposta(
-                encontrou=False, confianca="baixa", pedido_operacional=True, cliente=acolhe
-            )
+            resposta=_resposta(encontrou=False, confianca="baixa", pedido_operacional=True)
         ),
         busca_web=web,
     )
@@ -742,7 +742,7 @@ async def test_pedido_operacional_acolhe_escala_e_nao_vai_a_web(settings):
     assert insp.decisao is Decisao.ESCALAR
     assert web.chamadas == []  # pedido operacional é execução humana → não busca web
     assert insp.via_web is False
-    assert acolhe in insp.nota  # acolhimento para o agente enviar
+    assert RESPOSTA_ESCALAR_PADRAO in insp.nota  # cliente recebe a saudação-padrão
 
 
 async def test_fallback_quando_get_ticket_falha_usa_defaults(settings):
