@@ -98,6 +98,8 @@ def _imprimir(ticket, insp: Inspecao, raw: bool) -> None:
         print("    " + insp.resposta.resposta_cliente.replace("\n", "\n    "))
         print("\n  NOTA INTERNA (que SERIA criada):")
         print("    " + insp.nota.replace("\n", "\n    "))
+        print("\n  WHATSAPP (que SERIA enviado ao responsável/grupo):")
+        print("    " + insp.whatsapp.replace("\n", "\n    "))
     else:
         print(f"\n  rascunho     : {_uma_linha(insp.resposta.resposta_cliente, 240)}")
 

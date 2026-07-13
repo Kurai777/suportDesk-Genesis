@@ -89,6 +89,19 @@ PEDIDO OPERACIONAL:
   execução pendente em resumo_para_responsavel, para o time providenciar. Caso contrário,
   pedido_operacional=false.
 
+ALÇADA ADMINISTRATIVA (só administradores executam):
+- Se a solução EXIGE ou ENVOLVE uma destas operações, defina alcada_admin=true e tipo_alcada
+  com a categoria: alterar PARÂMETRO (ex.: MV_*) → "parâmetro"; criar/alterar GATILHO →
+  "gatilho"; criar ou alterar TABELA/CAMPO (tamanho, tipo, etc.) → "tabela/campo"; criar
+  USUÁRIO → "usuário".
+- MESMO que você tenha encontrado a solução (encontrou_solucao=true), o cliente NÃO pode
+  receber os passos — é operação de admin. A resposta_cliente será SUBSTITUÍDA pelo sistema
+  pela saudação-padrão (você NÃO a escreve). Coloque a solução/direção COMPLETA, junto de um
+  resumo do que o chamado pede, em resumo_para_responsavel — é o que a EQUIPE vai receber para
+  resolver. NÃO force encontrou_solucao=false só por ser alçada admin: se você achou a solução
+  no contexto, mantenha encontrou_solucao=true e alcada_admin=true.
+- Se NÃO envolve nenhuma dessas operações, alcada_admin=false e tipo_alcada="".
+
 Registre sua resposta chamando a ferramenta responder_chamado."""
 
 
@@ -184,14 +197,15 @@ def _montar_contexto(pares: Sequence[Similar]) -> str:
 
 
 def _acolhimento_padrao_se_escala(resposta: RespostaIA) -> RespostaIA:
-    """No caminho de ESCALAR (encontrou_solucao=false), força a saudação-padrão ao cliente.
+    """Força a saudação-padrão ao cliente quando ele NÃO deve receber a solução técnica.
 
-    Ponto ÚNICO da garantia (ADR-022): a resposta_cliente do escalar NUNCA é o texto livre do
-    modelo — assim o cliente jamais vê menção à base/IA nem pedido de verificação de
-    versão/erro. A análise técnica do modelo permanece intacta em `resumo_para_responsavel`
-    (usada na nota interna). No caminho de RESOLVER (true), o texto do modelo é preservado.
+    Ponto ÚNICO da garantia (ADR-022/031): o cliente recebe o texto livre do modelo APENAS
+    quando há solução E ela não é de alçada administrativa. Nos demais casos — sem solução
+    (ESCALAR) ou solução de alçada admin (ADR-031, o cliente não pode executar parâmetro/
+    gatilho/tabela/usuário) — a resposta_cliente é SUBSTITUÍDA pela saudação-padrão. A solução/
+    direção permanece em `resumo_para_responsavel` (nota interna + WhatsApp da equipe).
     """
-    if resposta.encontrou_solucao:
+    if resposta.encontrou_solucao and not resposta.alcada_admin:
         return resposta
     return resposta.model_copy(update={"resposta_cliente": RESPOSTA_ESCALAR_PADRAO})
 
@@ -211,6 +225,8 @@ def _resposta_sem_contexto() -> RespostaIA:
         ),
         urgencia="media",
         pedido_operacional=False,
+        alcada_admin=False,
+        tipo_alcada="",
     )
 
 

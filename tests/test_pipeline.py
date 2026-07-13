@@ -183,7 +183,14 @@ def _ticket_com_imagem(
     )
 
 
-def _resposta(encontrou=True, confianca="alta", pedido_operacional=False, cliente=None):
+def _resposta(
+    encontrou=True,
+    confianca="alta",
+    pedido_operacional=False,
+    cliente=None,
+    alcada_admin=False,
+    tipo_alcada="",
+):
     return RespostaIA(
         resposta_cliente=cliente or "Atualize a taxa da moeda 3 e reprocesse a NF.",
         encontrou_solucao=encontrou,
@@ -191,11 +198,17 @@ def _resposta(encontrou=True, confianca="alta", pedido_operacional=False, client
         resumo_para_responsavel="Moeda 3 do Ativo Fixo sem taxa do dia.",
         urgencia="alta",
         pedido_operacional=pedido_operacional,
+        alcada_admin=alcada_admin,
+        tipo_alcada=tipo_alcada,
     )
 
 
-def _resultado(encontrou, confianca):
-    return ResultadoChamado(ticket_id=1, empresa="X", resposta=_resposta(encontrou, confianca))
+def _resultado(encontrou, confianca, alcada_admin=False):
+    return ResultadoChamado(
+        ticket_id=1,
+        empresa="X",
+        resposta=_resposta(encontrou, confianca, alcada_admin=alcada_admin),
+    )
 
 
 # --- decisão (função pura) -------------------------------------------------
@@ -243,6 +256,33 @@ def test_decidir_guardrail_distancia_supera_autoavaliacao(distancia, esperado):
         decidir(resultado, "alta", melhor_distancia=distancia, distancia_maxima=0.40)
         is esperado
     )
+
+
+def test_decidir_alcada_admin_com_solucao_vira_terceira_via():
+    # Solução CONFIÁVEL, mas de alçada admin -> nem RESOLVIDO nem ESCALAR: ALCADA_ADMIN (ADR-031).
+    resultado = _resultado(encontrou=True, confianca="alta", alcada_admin=True)
+    d = decidir(resultado, "alta", melhor_distancia=0.30, distancia_maxima=0.40)
+    assert d is Decisao.ALCADA_ADMIN
+
+
+def test_decidir_alcada_admin_pedido_operacional_vai_a_equipe():
+    # Tarefa operacional de admin (ex.: criar usuário): encontrou=false, mas há brief a entregar
+    # -> ALCADA_ADMIN (o grupo recebe a direção), não ESCALAR comum. ADR-031.
+    resultado = ResultadoChamado(
+        ticket_id=1,
+        empresa="X",
+        resposta=_resposta(encontrou=False, confianca="media", pedido_operacional=True,
+                           alcada_admin=True, tipo_alcada="usuário"),
+    )
+    d = decidir(resultado, "alta", melhor_distancia=0.26, distancia_maxima=0.40)
+    assert d is Decisao.ALCADA_ADMIN
+
+
+def test_decidir_alcada_admin_sem_solucao_nem_tarefa_escala():
+    # Alçada admin, sem solução confiável E sem ser tarefa -> ESCALAR comum (avisa a alçada).
+    resultado = _resultado(encontrou=True, confianca="alta", alcada_admin=True)
+    d = decidir(resultado, "alta", melhor_distancia=0.47, distancia_maxima=0.40)
+    assert d is Decisao.ESCALAR
 
 
 # --- fluxo resolvido -------------------------------------------------------
@@ -530,6 +570,76 @@ async def test_inspecionar_resolve_quando_par_esta_dentro_do_limiar(settings):
     )
 
     assert insp.decisao is Decisao.RESOLVIDO
+
+
+# --- alçada administrativa: solução vai à EQUIPE, não ao cliente (ADR-031) --
+
+
+async def test_inspecionar_alcada_admin_encaminha_solucao_a_equipe(settings):
+    # Solução confiável (par 0,30) MAS de alçada admin -> ALCADA_ADMIN: o grupo recebe a
+    # direção (resumo), a nota marca alçada, e o cliente não recebe os passos.
+    par_perto = Similar(None, "p", "s", None, 0.30, fonte="ticket")
+    resposta = _resposta(
+        encontrou=True, confianca="alta", alcada_admin=True, tipo_alcada="usuário"
+    )
+    resposta = resposta.model_copy(
+        update={"resumo_para_responsavel": "Criar usuário X copiando o perfil de Y (SIGACFG)."}
+    )
+
+    insp = await inspecionar(
+        _ticket(),
+        settings=settings,
+        rag_service=FakeRag([par_perto]),
+        claude=FakeClaude(resposta=resposta),
+    )
+
+    assert insp.decisao is Decisao.ALCADA_ADMIN
+    # Grupo/WhatsApp recebe a direção completa (o resumo), rotulada como alçada admin.
+    assert "ALÇADA ADMIN (usuário)" in insp.whatsapp
+    assert "Criar usuário X copiando o perfil de Y" in insp.whatsapp
+    # Nota interna marca a alçada e traz a direção; o cliente não recebe os passos.
+    assert "ALÇADA ADMINISTRATIVA (usuário)" in insp.nota
+    assert "NÃO instruir o cliente" in insp.nota
+
+
+async def test_inspecionar_alcada_admin_pedido_operacional_manda_brief_ao_grupo(settings):
+    # Tarefa operacional de admin (criar usuário, #4450): encontrou=false, mas o grupo recebe
+    # o brief completo (resumo), não a mensagem curta de escalar (ADR-031).
+    brief = "Criar usuário para Lauriany, copiando o perfil da Jessyca (SIGACFG)."
+    resposta = _resposta(
+        encontrou=False, confianca="media", pedido_operacional=True,
+        alcada_admin=True, tipo_alcada="usuário",
+    ).model_copy(update={"resumo_para_responsavel": brief})
+
+    insp = await inspecionar(
+        _ticket(),
+        settings=settings,
+        rag_service=FakeRag([Similar(2, "p", "s", "E", 0.26, fonte="ticket")]),
+        claude=FakeClaude(resposta=resposta),
+    )
+
+    assert insp.decisao is Decisao.ALCADA_ADMIN
+    assert brief in insp.whatsapp  # o grupo recebe a direção completa
+    assert "ALÇADA ADMIN (usuário)" in insp.whatsapp
+
+
+async def test_inspecionar_alcada_admin_sem_solucao_nem_tarefa_escala_avisando(settings):
+    # Alçada admin, match distante (0,47) e NÃO é tarefa -> ESCALAR, avisando que é alçada admin.
+    par_distante = Similar(None, "p", "s", None, 0.47, fonte="documentacao", titulo="doc")
+    resposta = _resposta(
+        encontrou=True, confianca="alta", alcada_admin=True, tipo_alcada="parâmetro"
+    )
+
+    insp = await inspecionar(
+        _ticket(),
+        settings=settings,
+        rag_service=FakeRag([par_distante]),
+        claude=FakeClaude(resposta=resposta),
+    )
+
+    assert insp.decisao is Decisao.ESCALAR
+    assert "alçada admin (parâmetro)" in insp.whatsapp
+    assert "ALÇADA ADMIN (parâmetro)" in insp.nota
 
 
 async def test_inspecionar_aciona_web_e_expoe_pares_web(settings):

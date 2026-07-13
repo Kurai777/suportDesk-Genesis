@@ -74,6 +74,22 @@ class RespostaIA(BaseModel):
             "cliente e sinaliza ao time que há execução pendente."
         ),
     )
+    alcada_admin: bool = Field(
+        default=False,
+        description=(
+            "true se a solução EXIGE ou ENVOLVE uma operação de ALÇADA ADMINISTRATIVA (só "
+            "admins fazem): alterar PARÂMETRO (MV_*), criar/alterar GATILHO, criar/alterar "
+            "TABELA ou CAMPO (tamanho, etc.), ou criar USUÁRIO. Nesse caso o cliente NÃO recebe "
+            "os passos (recebe a saudação-padrão); a solução/direção vai à EQUIPE (ADR-031)."
+        ),
+    )
+    tipo_alcada: str = Field(
+        default="",
+        description=(
+            "Quando alcada_admin=true, a categoria: 'parâmetro', 'gatilho', 'tabela/campo' ou "
+            "'usuário'. Vazio quando alcada_admin=false."
+        ),
+    )
     # `empresa` NÃO entra aqui: é um fato do chamado (TicketFreshdesk.empresa), não algo
     # que o modelo deva gerar — evita o Claude "pegar" a empresa de um vizinho recuperado.
     # Ela é acoplada depois em `ResultadoChamado`, montado pelo pipeline.
@@ -165,6 +181,8 @@ class TesteResposta(BaseModel):
     encontrou_solucao: bool
     confianca: str
     pedido_operacional: bool  # tarefa a executar por uma pessoa (ADR-020)
+    alcada_admin: bool  # solução é operação de admin -> vai à equipe, não ao cliente (ADR-031)
+    tipo_alcada: str  # categoria da alçada (parâmetro/gatilho/tabela/usuário) ou vazio
     resposta_cliente: str  # o rascunho que iria ao cliente
     resumo_para_responsavel: str
     urgencia: str

@@ -173,6 +173,27 @@ async def test_escalar_forca_texto_modelo_fixo_e_nao_vaza(settings):
     assert "versão" in resposta.resumo_para_responsavel.lower()
 
 
+async def test_alcada_admin_forca_saudacao_ao_cliente_mesmo_com_solucao(settings):
+    # Alçada admin (ADR-031): mesmo com encontrou_solucao=true, o cliente NÃO recebe os passos —
+    # recebe a saudação-padrão. A solução/direção é preservada em resumo_para_responsavel (equipe).
+    admin = {
+        **SAIDA_OK,
+        "encontrou_solucao": True,
+        "alcada_admin": True,
+        "tipo_alcada": "parâmetro",
+        "resposta_cliente": "Altere o parâmetro MV_ATFMOED para 3 no configurador.",
+        "resumo_para_responsavel": "Ajustar MV_ATFMOED=3 (SIGACFG) — operação de admin.",
+    }
+    client = ClaudeClient(settings, client=FakeAnthropic(admin))
+
+    resposta = await client.gerar_resposta("problema", PARES)
+
+    assert resposta.resposta_cliente == RESPOSTA_ESCALAR_PADRAO  # cliente não recebe os passos
+    assert "MV_ATFMOED" not in resposta.resposta_cliente
+    assert resposta.alcada_admin is True
+    assert "MV_ATFMOED" in resposta.resumo_para_responsavel  # direção preservada p/ a equipe
+
+
 async def test_contexto_vazio_curto_circuita_sem_chamar_modelo(settings):
     # Se o modelo fosse chamado, o input {} falharia na validação de RespostaIA.
     fake = FakeAnthropic({})

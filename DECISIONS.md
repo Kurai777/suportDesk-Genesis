@@ -830,3 +830,38 @@ Um módulo só é considerado PRONTO quando:
   guardrail incluindo o **#4446 explícito** (0,4617 → ESCALAR), o limiar exato (0,40 → RESOLVER), logo
   acima (0,4017 → ESCALAR) e sem par (None → ESCALAR); no nível do `inspecionar`, par distante escala
   apesar de "alta" e par dentro do limiar resolve. **191 passando, ruff limpo.**
+
+## ADR-031 — Alçada administrativa: solução vai à EQUIPE, não ao cliente (3ª via)
+
+- **Diretriz de negócio (revelada na auditoria):** algumas soluções só ADMINISTRADORES executam —
+  alterar **parâmetro** (MV_*), criar/alterar **gatilho**, criar/alterar **tabela/campo**, criar
+  **usuário**. O cliente NUNCA pode receber os passos dessas operações. Foi o que explicava vários
+  "errou" na classificação: o conteúdo estava certo, o DESTINO é que estava errado (ia ao cliente).
+- **Mas NÃO se descarta a solução:** a IA manda a direção para a **EQUIPE no grupo do WhatsApp**
+  (ADR-029), com o contexto do chamado — um "norte" pronto para o time resolver. Direcionar a
+  resposta, não jogá-la fora.
+- **Terceira via de decisão — `Decisao.ALCADA_ADMIN`** (além de RESOLVIDO/ESCALAR):
+  - **Cliente:** sempre o acolhimento-padrão (o `_acolhimento_padrao_se_escala` agora força a
+    saudação quando `not encontrou OU alcada_admin` — ponto único, como ADR-022).
+  - **Equipe (nota + WhatsApp do grupo):** a direção COMPLETA, em `resumo_para_responsavel`.
+  - **Dispara quando** `alcada_admin=true` E há o que entregar: solução confiável (erro com correção
+    na base — ex.: #4441, rejeição 930/benefício fiscal, par 0,36) OU **pedido operacional** (a
+    tarefa e seus dados — ex.: #4450, criar usuário). Admin SEM solução nem tarefa → ESCALAR comum,
+    avisando que é alçada admin.
+- **Detecção pelo modelo:** novos campos `alcada_admin: bool` + `tipo_alcada: str` no contrato
+  `RespostaIA` (defaults false/"" — não quebram consumidores). O SYSTEM_PROMPT define as 4 operações e
+  manda: mesmo com `encontrou_solucao=true`, o cliente não recebe os passos; a solução/direção +
+  contexto vão para `resumo_para_responsavel`.
+- **Compõe com o guardrail (ADR-030):** a via ALÇADA_ADMIN por SOLUÇÃO exige match confiável
+  (≤ limiar); por PEDIDO OPERACIONAL não depende de distância (o brief vem do próprio chamado, não da
+  base). Também roteia soluções de alçada vindas da **busca web**.
+- **Interface `/teste`:** novo badge "ALÇADA ADMIN (tipo) — vai à equipe"; `TesteResposta` expõe
+  `alcada_admin`/`tipo_alcada`. O `inspecionar_chamado --raw` passa a mostrar também a mensagem de
+  WhatsApp (o que a equipe recebe).
+- **Validação ao vivo:** #4441 → ALÇADA_ADMIN com a solução ao grupo; #4450 → ALÇADA_ADMIN com o
+  brief operacional completo (criar a Lauriany, copiar perfil da Jessyca, ref. #4210) ao grupo; o
+  cliente, em ambos, só o acolhimento.
+- **Testes (mock, zero rede):** `decidir` — solução+admin → ALÇADA_ADMIN; operacional+admin →
+  ALÇADA_ADMIN; admin sem solução nem tarefa → ESCALAR. `inspecionar` — grupo recebe a direção/brief e
+  o cliente o acolhimento. `claude_client` — alçada admin força a saudação mesmo com solução, e
+  preserva a direção em `resumo`. **198 passando, ruff limpo.**

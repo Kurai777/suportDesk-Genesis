@@ -36,8 +36,9 @@ _MAX_IMAGENS = 4  # limita custo/latência por chamado (best-effort)
 
 
 class Decisao(StrEnum):
-    RESOLVIDO = "resolvido"
-    ESCALAR = "escalar"
+    RESOLVIDO = "resolvido"  # solução ao cliente
+    ALCADA_ADMIN = "alcada_admin"  # achou solução, mas é op. de admin -> vai à equipe (ADR-031)
+    ESCALAR = "escalar"  # sem solução confiável -> análise humana
 
 
 # --- decisão (função PURA, sem I/O) ----------------------------------------
@@ -59,12 +60,19 @@ def decidir(
     Sem par recuperado (`melhor_distancia is None`), escala — não há como confirmar objetivamente.
     """
     r = resultado.resposta
-    if (
+    tem_solucao_confiavel = (
         r.encontrou_solucao
         and _atende_minimo(r.confianca, confianca_minima)
         and melhor_distancia is not None
         and melhor_distancia <= distancia_maxima
-    ):
+    )
+    # ALÇADA ADMIN (ADR-031): parâmetro/gatilho/tabela/usuário não vão ao cliente — a EQUIPE
+    # recebe a direção no grupo. Vale quando a IA tem o que entregar: uma solução confiável
+    # (erro com correção na base) OU um pedido operacional (a tarefa e seus dados, ex.: criar
+    # usuário). Só admin SEM nada útil (nem solução nem tarefa) cai no ESCALAR comum.
+    if r.alcada_admin and (tem_solucao_confiavel or r.pedido_operacional):
+        return Decisao.ALCADA_ADMIN
+    if tem_solucao_confiavel:
         return Decisao.RESOLVIDO
     return Decisao.ESCALAR
 
@@ -84,6 +92,11 @@ def _montar_problema(ticket: TicketFreshdesk) -> str:
     return limpar_texto(f"{ticket.subject}\n\n{ticket.description_text}")
 
 
+def _rotulo_alcada(r: RespostaIA) -> str:
+    """' (parâmetro)' etc., para anexar às mensagens; vazio se sem tipo."""
+    return f" ({r.tipo_alcada})" if r.tipo_alcada else ""
+
+
 def _nota(decisao: Decisao, r: RespostaIA, *, via_web: bool = False) -> str:
     if decisao is Decisao.RESOLVIDO:
         origem = (
@@ -93,29 +106,56 @@ def _nota(decisao: Decisao, r: RespostaIA, *, via_web: bool = False) -> str:
             else "🤖 Rascunho gerado por IA (revisar antes de enviar)."
         )
         return f"{origem} Confiança: {r.confianca}.\n\n{r.resposta_cliente}"
+    if decisao is Decisao.ALCADA_ADMIN:
+        # Operação de ADMIN (ADR-031): o cliente recebeu só o acolhimento; a direção completa
+        # (solução do erro OU o brief da tarefa) está em `resumo`, para a equipe resolver.
+        return (
+            f"🔧 ALÇADA ADMINISTRATIVA{_rotulo_alcada(r)} — operação de admin. O cliente "
+            "recebeu só o acolhimento padrão; NÃO instruir o cliente a executar.\n\n"
+            f"— Direção para a equipe —\n{r.resumo_para_responsavel}"
+        )
     # ESCALAR: para o TIME. Linha de status TÉCNICA (verdade) + resumo; e o rascunho de
     # acolhimento ao cliente, para o agente revisar e enviar (só a resposta_cliente é
-    # "cliente-friendly"; o status acima segue cru). Para pedido operacional, o resumo do
-    # Claude já sinaliza a execução pendente.
+    # "cliente-friendly"; o status acima segue cru). Alçada admin sem solução é sinalizada.
     extra = " (a busca web em sites oficiais TOTVS também não trouxe solução)" if via_web else ""
+    admin = f" Envolve ALÇADA ADMIN{_rotulo_alcada(r)}." if r.alcada_admin else ""
     return (
-        f"⚠️ IA não encontrou solução na base{extra}. Requer análise manual.\n\n"
+        f"⚠️ IA não encontrou solução na base{extra}. Requer análise manual.{admin}\n\n"
         f"Resumo: {r.resumo_para_responsavel}\n\n"
         f"— Rascunho de acolhimento ao cliente (revisar antes de enviar) —\n"
         f"{r.resposta_cliente}"
     )
 
 
-def _whatsapp(decisao: Decisao, ticket_id: int, empresa: str, *, via_web: bool = False) -> str:
+def _whatsapp(
+    decisao: Decisao,
+    ticket_id: int,
+    empresa: str,
+    resposta: RespostaIA | None = None,
+    *,
+    via_web: bool = False,
+) -> str:
     if decisao is Decisao.RESOLVIDO:
         aviso = " (via BUSCA WEB — revise a fonte com atenção)" if via_web else ""
         return (
             f"✅ Chamado #{ticket_id} da {empresa} — "
             f"rascunho pronto no Freshdesk para revisão{aviso}."
         )
+    if decisao is Decisao.ALCADA_ADMIN and resposta is not None:
+        # A EQUIPE recebe a direção COMPLETA + o que o chamado traz (ADR-031). O cliente não.
+        return (
+            f"🔧 Chamado #{ticket_id} da {empresa} — ALÇADA ADMIN{_rotulo_alcada(resposta)}. "
+            "O cliente recebeu só o acolhimento. Direção para resolvermos:"
+            f"\n\n{resposta.resumo_para_responsavel}"
+        )
+    admin = (
+        f" (envolve alçada admin{_rotulo_alcada(resposta)})"
+        if resposta is not None and resposta.alcada_admin
+        else ""
+    )
     return (
         f"🔴 Chamado #{ticket_id} da {empresa} — não encontrei solução na base do "
-        f"TOTVS. Recomendo olhar pessoalmente."
+        f"TOTVS{admin}. Recomendo olhar pessoalmente."
     )
 
 
@@ -263,7 +303,7 @@ async def inspecionar(
         pares_web=pares_web,
         query_web=query_web,
         nota=_nota(decisao, resposta, via_web=via_web),
-        whatsapp=_whatsapp(decisao, ticket.id, ticket.empresa, via_web=via_web),
+        whatsapp=_whatsapp(decisao, ticket.id, ticket.empresa, resposta, via_web=via_web),
     )
 
 
@@ -291,9 +331,13 @@ async def _tentar_busca_web(
             return resposta, decisao, False, []  # web vazia → mantém a escala local
         pares_web = _pares_web(trechos)
         resposta_web = await claude.gerar_resposta(problema, pares_web)
-        decisao_web = (
-            Decisao.RESOLVIDO if resposta_web.encontrou_solucao else Decisao.ESCALAR
-        )
+        if resposta_web.encontrou_solucao:
+            # Solução da web de alçada admin também vai à equipe, não ao cliente (ADR-031).
+            decisao_web = (
+                Decisao.ALCADA_ADMIN if resposta_web.alcada_admin else Decisao.RESOLVIDO
+            )
+        else:
+            decisao_web = Decisao.ESCALAR
         return resposta_web, decisao_web, True, pares_web
     except Exception:
         logger.exception(

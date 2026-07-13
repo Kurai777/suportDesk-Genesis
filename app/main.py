@@ -173,6 +173,8 @@ def _para_resposta(insp: Inspecao, empresa: str) -> TesteResposta:
         encontrou_solucao=r.encontrou_solucao,
         confianca=r.confianca,
         pedido_operacional=r.pedido_operacional,
+        alcada_admin=r.alcada_admin,
+        tipo_alcada=r.tipo_alcada,
         resposta_cliente=r.resposta_cliente,
         resumo_para_responsavel=r.resumo_para_responsavel,
         urgencia=r.urgencia,
