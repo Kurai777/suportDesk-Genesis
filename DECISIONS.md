@@ -825,8 +825,19 @@ sessão** — e é limpa. Isso **derruba o scraping de DOM**: a integração vir
        (`extrair_otp`, 4–8 dígitos). Snapshot de ids ignora histórico; timeout devolve None.
      - Teste ao vivo (Evolution real, grupo real): pedido postado → resposta no grupo →
        **OTP `444765` capturado**. Envio e recepção de GRUPO provados ponta a ponta.
-     FALTA: o **login 2FA via browser** (Playwright) que dispara `RelayOtp.solicitar()` no ponto
-     do 2FA, injeta o código e captura o **JWT** → vira a `SessaoPortal` do `PortalTotvsClient`.
+     FALTA: o **`PortalLoginProvider`** (browser) que dispara `RelayOtp` no 2FA, injeta o código e
+     captura o **JWT** → `SessaoPortal`. **Mapa do login já levantado (spike CDP, 2026-07-22):**
+     - **Login** (SSO SAML `totvs.fluigidentity.com/ui/login-saml`): `input#username` (email) +
+       `input#password` + botão "Entrar".
+     - **2FA** (só em dispositivo NÃO-confiável): `totvs.fluigidentity.com/ui/mfa/login` →
+       `input#mfa-token` (placeholder `000-000`, `autocomplete=one-time-code`) + botão "Entrar".
+     - **Dispositivo confiável / perfil persistido:** o 2FA é LEMBRADO → login vira só credencial
+       (o 2FA+relay é fallback ocasional). Após o SAML, o Portal emite o JWT (capturado do corpo do
+       `get-tickets`, como na receita da API).
+     - **Provider (a construir):** Playwright + perfil persistido; preenche credencial → se aparecer
+       `#mfa-token`, `RelayOtp.solicitar()` (Gustavo responde no grupo) → preenche → "Entrar" →
+       captura o JWT/userId/customerCode → `SessaoPortal`. Credencial em `.env` (nunca no chat/git);
+       requer `playwright install chromium` (binário do browser no servidor).
   2. **Ligar no fluxo** — busca ao vivo no ESCALAR (latência tolerável, decisão do Bruno) e/ou
      `ingest_portal.py` (varrer + ingerir no RAG, `fonte='portal_totvs'`, idempotência DB-native).
   3. **View certa do pool cross-cliente** (o template capturado era "Meus Tickets") + **medir a
