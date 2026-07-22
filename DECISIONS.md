@@ -815,8 +815,12 @@ sessão** — e é limpa. Isso **derruba o scraping de DOM**: a integração vir
   assinatura → inutilizável) + um e-mail foram removidos do disco; artefatos com dado de terceiros
   apagados. O `token` é segredo — nunca logar.
 - **Pendente para produção:**
-  1. **Provedor de token** — login 2FA humano + **relay do OTP pelo grupo de WhatsApp** (exige
-     **WhatsApp de ENTRADA**, hoje inexistente) para mintar/renovar o JWT e mantê-lo quente.
+  1. **Provedor de token** — login 2FA humano + **relay do OTP pelo grupo de WhatsApp**. ✅ A
+     metade RECEPTORA já existe: `POST /webhook/whatsapp` recebe o evento `messages.upsert` da
+     Evolution (auth por segredo em header/`?secret=`), normaliza (`parse_evento_evolution` →
+     `MensagemRecebida`) e guarda no `InboxWhatsApp` (buffer em memória) — o log/inbox permite
+     testar o fluxo ponta-a-ponta. FALTA: o login 2FA (browser) que PEDE o OTP no grupo e o
+     consumidor que lê o OTP do inbox e minta/renova o JWT.
   2. **Ligar no fluxo** — busca ao vivo no ESCALAR (latência tolerável, decisão do Bruno) e/ou
      `ingest_portal.py` (varrer + ingerir no RAG, `fonte='portal_totvs'`, idempotência DB-native).
   3. **View certa do pool cross-cliente** (o template capturado era "Meus Tickets") + **medir a

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import httpx
 import psycopg
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pgvector.psycopg import register_vector_async
 
@@ -51,7 +51,7 @@ from app.pipeline import (
 )
 from app.rag import RagRepository, RagService, Similar, VoyageClient
 from app.visao import VisaoClient
-from app.whatsapp import WhatsAppClient
+from app.whatsapp import InboxWhatsApp, WhatsAppClient, parse_evento_evolution
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
     app.state.visao = VisaoClient(settings)  # leitura de imagens dos chamados (ADR-023)
     # Único cliente reaproveitado entre chamados: mantém o cache de busca web em memória.
     app.state.busca_web = BuscaWebClient()
+    app.state.whatsapp_inbox = InboxWhatsApp()  # mensagens recebidas (relay de token, ADR-026)
     try:
         yield
     finally:
@@ -93,6 +94,37 @@ async def webhook_freshdesk(
     # Responde 200 na hora; processa depois, fora do ciclo de resposta do Freshdesk.
     background.add_task(_rodar_pipeline, request.app, payload.ticket_id)
     return {"status": "aceito", "ticket_id": payload.ticket_id}
+
+
+@app.post("/webhook/whatsapp", status_code=200)
+async def webhook_whatsapp(
+    payload: dict,
+    request: Request,
+    x_webhook_secret: str = Header(default=""),
+    secret: str = Query(default=""),
+) -> dict:
+    """Recebe eventos da Evolution (mensagens do grupo) — base do relay de token 2FA (ADR-026).
+
+    Autentica por segredo: header `x-webhook-secret` OU `?secret=` na URL (a Evolution posta na
+    URL configurada, então o query param sempre funciona). Só registra mensagens de texto de
+    TERCEIROS (ignora as próprias e eventos que não são de mensagem).
+    """
+    settings: Settings = request.app.state.settings
+    recebido = x_webhook_secret or secret
+    if not _secret_valido(recebido, settings.whatsapp_webhook_secret):
+        raise HTTPException(status_code=401, detail="segredo inválido")
+    msg = parse_evento_evolution(payload)
+    if msg is None or msg.de_mim or not msg.texto.strip():
+        return {"status": "ignorado"}
+    request.app.state.whatsapp_inbox.registrar(msg)
+    logger.info(
+        "[WhatsApp IN] %s de %s (%s): %s",
+        "grupo" if msg.eh_grupo else "contato",
+        msg.remetente_nome or "?",
+        msg.remetente_jid,
+        msg.texto[:200],
+    )
+    return {"status": "recebido"}
 
 
 async def _rodar_pipeline(app: FastAPI, ticket_id: int) -> None:

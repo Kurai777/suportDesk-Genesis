@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import deque
+from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from tenacity import (
@@ -137,3 +140,84 @@ class WhatsAppClient:
 
     async def __aexit__(self, *_exc: object) -> None:
         await self.close()
+
+
+# --- Entrada: webhook da Evolution (mensagens recebidas) --------------------
+# Base do relay de token 2FA (ADR-026): a Evolution POSTa cada mensagem do grupo no nosso
+# webhook; aqui a normalizamos e guardamos as recentes para um consumidor (futuro provedor de
+# token) achar o OTP que o responsável respondeu no grupo.
+
+
+@dataclass(frozen=True)
+class MensagemRecebida:
+    """Mensagem recebida, normalizada de um evento `messages.upsert` da Evolution."""
+
+    chat_jid: str  # remoteJid: o chat (grupo `@g.us` ou contato `@s.whatsapp.net`)
+    remetente_jid: str  # quem enviou (participant no grupo; senão, o próprio chat)
+    remetente_nome: str  # pushName
+    texto: str
+    de_mim: bool  # fromMe: enviada pela PRÓPRIA instância (ignorar no relay)
+    id: str
+    eh_grupo: bool
+
+
+def _texto_da_mensagem(message: dict[str, Any]) -> str:
+    """Texto de uma mensagem, cobrindo os formatos comuns da Evolution (texto/estendido/legenda)."""
+    if not isinstance(message, dict):
+        return ""
+    conv = message.get("conversation")
+    if isinstance(conv, str):
+        return conv
+    ext = message.get("extendedTextMessage")
+    if isinstance(ext, dict) and isinstance(ext.get("text"), str):
+        return ext["text"]
+    for chave in ("imageMessage", "videoMessage", "documentMessage"):
+        midia = message.get(chave)
+        if isinstance(midia, dict) and isinstance(midia.get("caption"), str):
+            return midia["caption"]
+    return ""
+
+
+def parse_evento_evolution(payload: dict[str, Any]) -> MensagemRecebida | None:
+    """Extrai a mensagem de um evento `messages.upsert`. None se não for esse evento/sem dados."""
+    if not isinstance(payload, dict):
+        return None
+    evento = str(payload.get("event") or "")
+    # a Evolution manda "messages.upsert" (algumas configs, "messages_upsert").
+    if evento and "messages.upsert" not in evento.replace("_", ".").lower():
+        return None
+    data = payload.get("data")
+    if isinstance(data, list):  # pode vir 1 msg (dict) ou lista
+        data = data[0] if data else None
+    if not isinstance(data, dict):
+        return None
+    key = data.get("key") or {}
+    chat_jid = str(key.get("remoteJid") or "")
+    eh_grupo = chat_jid.endswith("@g.us")
+    remetente = key.get("participant") if eh_grupo else chat_jid
+    return MensagemRecebida(
+        chat_jid=chat_jid,
+        remetente_jid=str(remetente or ""),
+        remetente_nome=str(data.get("pushName") or ""),
+        texto=_texto_da_mensagem(data.get("message") or {}),
+        de_mim=bool(key.get("fromMe")),
+        id=str(key.get("id") or ""),
+        eh_grupo=eh_grupo,
+    )
+
+
+class InboxWhatsApp:
+    """Buffer em memória (efêmero) das últimas mensagens recebidas — base do relay de token.
+
+    Pequeno e não persistente: o webhook `registrar`; um consumidor lê as `recentes` para achar
+    o OTP. Reinício limpa (o token é curto e re-solicitável).
+    """
+
+    def __init__(self, tamanho: int = 50) -> None:
+        self._msgs: deque[MensagemRecebida] = deque(maxlen=tamanho)
+
+    def registrar(self, msg: MensagemRecebida) -> None:
+        self._msgs.appendleft(msg)
+
+    def recentes(self, n: int = 10) -> list[MensagemRecebida]:
+        return list(self._msgs)[:n]

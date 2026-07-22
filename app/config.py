@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # (ex.: 120363018941234567@g.us), NÃO um telefone. Descubra com scripts/lista_grupos_whatsapp.
     # Vazio = mantém o modelo antigo (notifica o telefone do responsável).
     whatsapp_grupo_destino: str = ""
+    # Segredo do webhook de ENTRADA (Evolution -> nós). Vazio = webhook rejeita tudo (padrão
+    # seguro). Configure na Evolution como header `x-webhook-secret` OU `?secret=` na URL. ADR-026.
+    whatsapp_webhook_secret: str = ""
 
     # --- Busca web (último recurso, ADR-015) ---
     # false = desligada (padrão seguro). Só dispara quando a base local (chamados +

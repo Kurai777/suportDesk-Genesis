@@ -11,7 +11,14 @@ import httpx
 import pytest
 import respx
 
-from app.whatsapp import WhatsAppClient, normalizar_numero, resolver_destino
+from app.whatsapp import (
+    InboxWhatsApp,
+    MensagemRecebida,
+    WhatsAppClient,
+    normalizar_numero,
+    parse_evento_evolution,
+    resolver_destino,
+)
 
 
 def _url(settings) -> str:
@@ -164,3 +171,100 @@ async def test_listar_grupos_parseia_jid_e_nome(settings):
         {"jid": _GRUPO, "nome": "Suporte Genesis"},
         {"jid": "999@g.us", "nome": "(sem nome)"},
     ]
+
+
+# --- entrada: parser do evento da Evolution (ADR-026) ----------------------
+
+
+def _evento_grupo(texto="123456", from_me=False):
+    return {
+        "event": "messages.upsert",
+        "instance": "genesis-instancia",
+        "data": {
+            "key": {
+                "remoteJid": "120363018941234567@g.us",
+                "fromMe": from_me,
+                "id": "MSGID1",
+                "participant": "5511988887777@s.whatsapp.net",
+            },
+            "pushName": "Fulano",
+            "message": {"conversation": texto},
+        },
+    }
+
+
+def test_parse_mensagem_de_grupo():
+    msg = parse_evento_evolution(_evento_grupo("o token é 987654"))
+    assert isinstance(msg, MensagemRecebida)
+    assert msg.eh_grupo is True
+    assert msg.chat_jid == "120363018941234567@g.us"
+    assert msg.remetente_jid == "5511988887777@s.whatsapp.net"  # participant, não o grupo
+    assert msg.remetente_nome == "Fulano"
+    assert msg.texto == "o token é 987654"
+    assert msg.de_mim is False
+
+
+def test_parse_mensagem_direta_usa_remotejid_como_remetente():
+    evento = {
+        "event": "messages.upsert",
+        "data": {
+            "key": {"remoteJid": "5511999998888@s.whatsapp.net", "fromMe": False, "id": "X"},
+            "message": {"conversation": "oi"},
+        },
+    }
+    msg = parse_evento_evolution(evento)
+    assert msg.eh_grupo is False
+    assert msg.remetente_jid == "5511999998888@s.whatsapp.net"
+
+
+def test_parse_extended_text_e_legenda():
+    ext = {
+        "event": "messages.upsert",
+        "data": {
+            "key": {"remoteJid": "g@g.us", "participant": "p@s.whatsapp.net"},
+            "message": {"extendedTextMessage": {"text": "resposta citada"}},
+        },
+    }
+    assert parse_evento_evolution(ext).texto == "resposta citada"
+    cap = {
+        "event": "messages.upsert",
+        "data": {
+            "key": {"remoteJid": "g@g.us", "participant": "p@s.whatsapp.net"},
+            "message": {"imageMessage": {"caption": "olha o print"}},
+        },
+    }
+    assert parse_evento_evolution(cap).texto == "olha o print"
+
+
+def test_parse_marca_de_mim():
+    assert parse_evento_evolution(_evento_grupo(from_me=True)).de_mim is True
+
+
+def test_parse_data_como_lista():
+    evt = _evento_grupo("na lista")
+    evt["data"] = [evt["data"]]  # Evolution pode mandar data como lista
+    assert parse_evento_evolution(evt).texto == "na lista"
+
+
+def test_parse_ignora_evento_nao_mensagem_e_lixo():
+    assert parse_evento_evolution({"event": "connection.update", "data": {}}) is None
+    assert parse_evento_evolution({"event": "messages.upsert"}) is None  # sem data
+    assert parse_evento_evolution({}) is None
+    assert parse_evento_evolution("não é dict") is None
+
+
+# --- inbox em memória ------------------------------------------------------
+
+
+def test_inbox_registra_recentes_e_respeita_tamanho():
+    inbox = InboxWhatsApp(tamanho=2)
+    a, b, c = (
+        MensagemRecebida("g", "p", "A", "1", False, "i1", True),
+        MensagemRecebida("g", "p", "B", "2", False, "i2", True),
+        MensagemRecebida("g", "p", "C", "3", False, "i3", True),
+    )
+    inbox.registrar(a)
+    inbox.registrar(b)
+    inbox.registrar(c)  # estoura o tamanho 2 -> 'a' cai
+    recentes = inbox.recentes()
+    assert [m.texto for m in recentes] == ["3", "2"]  # mais nova primeiro, 'a' descartada
