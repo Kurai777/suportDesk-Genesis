@@ -50,6 +50,9 @@ from app.pipeline import (
     inspecionar,
     processar,
 )
+from app.portal_service import PortalService
+from app.portal_sessao import SessaoStore
+from app.portal_totvs import PortalTotvsClient
 from app.rag import RagRepository, RagService, Similar, VoyageClient
 from app.visao import VisaoClient
 from app.whatsapp import InboxWhatsApp, WhatsAppClient, parse_evento_evolution
@@ -68,6 +71,15 @@ async def lifespan(app: FastAPI):
     # Único cliente reaproveitado entre chamados: mantém o cache de busca web em memória.
     app.state.busca_web = BuscaWebClient()
     app.state.whatsapp_inbox = InboxWhatsApp()  # mensagens recebidas (relay de token, ADR-026)
+    # Portal do Cliente TOTVS (ADR-026): busca no ESCALAR, só se ligado. O token vem do armazém
+    # (o refresher, out-of-band, minta e grava); aqui só LEMOS + buscamos via httpx.
+    if settings.portal_totvs_ativo:
+        _store = SessaoStore(settings.portal_sessao_arquivo)
+        app.state.portal_service = PortalService(
+            PortalTotvsClient(settings, client=app.state.http), _store.ler
+        )
+    else:
+        app.state.portal_service = None
     try:
         yield
     finally:
@@ -162,6 +174,7 @@ async def _rodar_pipeline(app: FastAPI, ticket_id: int) -> None:
             whatsapp=whatsapp,
             busca_web=app.state.busca_web,
             visao=app.state.visao,
+            portal_service=app.state.portal_service,
         )
     except Exception:
         logger.exception("Erro não tratado no pipeline do ticket %s.", ticket_id)

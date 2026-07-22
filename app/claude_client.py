@@ -195,6 +195,11 @@ def _rotulo_fonte(par: Similar) -> str:
             "Fonte: Busca web em referência técnica TOTVS/Protheus (oficial ou comunidade) — "
             f"{par.titulo or 'sem título'}"
         )
+    if par.fonte == "portal_totvs":
+        return (
+            "Fonte: Chamado RESOLVIDO no Portal do Cliente TOTVS (histórico do parceiro; exige "
+            f"revisão humana) — {par.titulo or 'sem título'}"
+        )
     return f"Fonte: Chamado anterior #{par.ticket_id}"
 
 

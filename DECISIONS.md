@@ -846,10 +846,26 @@ sessão** — e é limpa. Isso **derruba o scraping de DOM**: a integração vir
        `#mfa-token` não sumir (inválido/expirado), **avisa no grupo** ("❌ código inválido, manda
        outro") e re-tenta até `PORTAL_LOGIN_MAX_2FA`; no sucesso avisa "✅ login realizado". O
        `RelayOtp.avisar()` posta o feedback. Mitiga o TOTP; e o perfil persistido torna o 2FA RARO.
-  2. **Ligar no fluxo** — busca ao vivo no ESCALAR (latência tolerável, decisão do Bruno) e/ou
-     `ingest_portal.py` (varrer + ingerir no RAG, `fonte='portal_totvs'`, idempotência DB-native).
+  2. ✅ **LIGADO no fluxo (busca ao vivo no ESCALAR, 2026-07-22):**
+     - `app/portal_service.py` `PortalService.buscar(keywords)` → chama o `PortalTotvsClient`
+       (get-tickets por palavra-chave + get-comments) e devolve pares `Similar`
+       (`fonte='portal_totvs'`) dos chamados RESOLVIDOS. Gerencia a sessão: cacheia o token e, em
+       401/403, renova UMA vez pelo provedor. BEST-EFFORT ([] em falha).
+     - `pipeline.inspecionar`: novo `_tentar_portal` espelha o `_tentar_busca_web`, mas roda
+       **ANTES da web** (o Portal é a fonte do parceiro — mais autoritativa) e só no ESCALAR,
+       atrás de `PORTAL_TOTVS_ATIVO`. Reconsulta o Claude com os pares do Portal; alçada admin do
+       Portal vai à equipe (ADR-031). Nota/WhatsApp rotulam a origem ("📋 Portal do Cliente TOTVS").
+     - **Sessão desacoplada (decisão de arquitetura):** o browser (login 2FA) NÃO fica no caminho
+       do request. Um REFRESHER out-of-band (`scripts/refrescar_sessao_portal.py`) minta a
+       `SessaoPortal` (via `PortalLoginProvider` + relay) e GRAVA no `SessaoStore`
+       (`.portal_sessao.json`, gitignored, contém o token); o servidor só LÊ e busca via httpx.
+       Isso é robusto (browser fora do hot path) E contorna o conflito Proactor/Selector do
+       Windows (o server usa Selector p/ psycopg; o browser exige Proactor).
+     - Testes: `PortalService` (pares/top_k/sem-sessão/401-renova/best-effort), `_tentar_portal`
+       no pipeline (resolve/vazio/flag-off/local-resolve-antes), `SessaoStore` (roundtrip). O
+       `ingest_portal.py` em lote (varrer o histórico → RAG) fica como alternativa futura.
   3. **View certa do pool cross-cliente** (o template capturado era "Meus Tickets") + **medir a
-     validade do token** (cadência de re-auth).
+     validade do token** (cadência de re-auth do refresher).
 
 ## ADR-027 — Busca web LIGADA + visível na interface de teste
 

@@ -19,6 +19,7 @@ from app.claude_client import RESPOSTA_ESCALAR_PADRAO, ClaudeClient
 from app.config import Settings
 from app.freshdesk import FreshdeskClient
 from app.models import EMPRESA_DESCONHECIDA, RespostaIA, ResultadoChamado, TicketFreshdesk
+from app.portal_service import PortalService
 from app.rag import RagService, Similar
 from app.texto import limpar_texto
 from app.visao import VisaoClient
@@ -108,21 +109,38 @@ def _motivo_equipe(r: RespostaIA) -> str:
     return "TAREFA / EXECUÇÃO DA EQUIPE"
 
 
+def _fontes_tentadas(via_portal: bool, via_web: bool) -> str:
+    """Texto ' (o Portal … e a busca web … também não trouxe solução)' para o ESCALAR."""
+    tried = []
+    if via_portal:
+        tried.append("o Portal do Cliente TOTVS")
+    if via_web:
+        tried.append("a busca web em referências TOTVS/Protheus")
+    return f" ({' e '.join(tried)} também não trouxe solução)" if tried else ""
+
+
 def _nota(
     decisao: Decisao,
     r: RespostaIA,
     *,
     via_web: bool = False,
+    via_portal: bool = False,
     auto_elegivel: bool = False,
     modo_sombra: bool = False,
 ) -> str:
     if decisao is Decisao.RESOLVIDO:
-        origem = (
-            "🌐 Rascunho gerado a partir de BUSCA WEB em referência técnica TOTVS/Protheus "
-            "(confira a fonte no rodapé do trecho e revise antes de enviar)."
-            if via_web
-            else "🤖 Rascunho gerado por IA (revisar antes de enviar)."
-        )
+        if via_web:
+            origem = (
+                "🌐 Rascunho gerado a partir de BUSCA WEB em referência técnica TOTVS/Protheus "
+                "(confira a fonte no rodapé do trecho e revise antes de enviar)."
+            )
+        elif via_portal:
+            origem = (
+                "📋 Rascunho gerado a partir de CHAMADO RESOLVIDO no Portal do Cliente TOTVS "
+                "(histórico do parceiro — revise antes de enviar)."
+            )
+        else:
+            origem = "🤖 Rascunho gerado por IA (revisar antes de enviar)."
         # MODO SOMBRA (ADR-042): sinaliza que ESTE rascunho seria auto-enviado na Fase 2 — mas
         # NÃO foi (copiloto). Se o agente editar/descartar, é evidência de que o auto erraria.
         sombra = (
@@ -144,9 +162,7 @@ def _nota(
     # ESCALAR: para o TIME. Linha de status TÉCNICA (verdade) + resumo; e o rascunho de
     # acolhimento ao cliente, para o agente revisar e enviar (só a resposta_cliente é
     # "cliente-friendly"; o status acima segue cru). Alçada admin sem solução é sinalizada.
-    extra = (
-        " (a busca web em referências TOTVS/Protheus também não trouxe solução)" if via_web else ""
-    )
+    extra = _fontes_tentadas(via_portal, via_web)
     admin = f" Envolve ALÇADA ADMIN{_rotulo_alcada(r)}." if r.alcada_admin else ""
     return (
         f"⚠️ IA não encontrou solução na base{extra}. Requer análise manual.{admin}\n\n"
@@ -163,9 +179,15 @@ def _whatsapp(
     resposta: RespostaIA | None = None,
     *,
     via_web: bool = False,
+    via_portal: bool = False,
 ) -> str:
     if decisao is Decisao.RESOLVIDO:
-        aviso = " (via BUSCA WEB — revise a fonte com atenção)" if via_web else ""
+        if via_web:
+            aviso = " (via BUSCA WEB — revise a fonte com atenção)"
+        elif via_portal:
+            aviso = " (via Portal TOTVS — chamado resolvido do parceiro, revise)"
+        else:
+            aviso = ""
         return (
             f"✅ Chamado #{ticket_id} da {empresa} — "
             f"rascunho pronto no Freshdesk para revisão{aviso}."
@@ -252,6 +274,8 @@ class Inspecao:
     via_web: bool
     pares_web: list[Similar] = field(default_factory=list)  # trechos web (se acionada)
     query_web: str = ""  # a query REAL enviada aos domínios TOTVS ("" = web não acionada)
+    via_portal: bool = False  # o desfecho veio da busca no Portal do Cliente TOTVS (ADR-026)
+    pares_portal: list[Similar] = field(default_factory=list)  # chamados do Portal (se acionado)
     auto_elegivel: bool = False  # candidato a resposta automática (recorte ADR-041) — só marcador
     nota: str = ""  # nota interna que SERIA criada no Freshdesk
     whatsapp: str = ""  # mensagem que SERIA enviada no WhatsApp
@@ -261,14 +285,18 @@ def _elegivel_auto(
     decisao: Decisao,
     resposta: RespostaIA,
     melhor_distancia: float | None,
-    via_web: bool,
+    via_externa: bool,
     limiar_auto: float,
 ) -> bool:
-    """Núcleo do recorte de auto-resposta (ADR-041), por CAMPOS — antes de montar a Inspecao."""
+    """Núcleo do recorte de auto-resposta (ADR-041), por CAMPOS — antes de montar a Inspecao.
+
+    `via_externa` = a resposta veio de uma fonte SEM vetor (web ou Portal) — o guardrail de
+    distância não se aplica, então a proximidade não é exigida.
+    """
     if decisao is not Decisao.RESOLVIDO or resposta.confianca != "alta":
         return False
     perto = melhor_distancia is not None and melhor_distancia <= limiar_auto
-    return perto or via_web
+    return perto or via_externa
 
 
 def elegivel_auto(insp: Inspecao, limiar_auto: float) -> bool:
@@ -280,7 +308,8 @@ def elegivel_auto(insp: Inspecao, limiar_auto: float) -> bool:
     depende da medição humana provar que os candidatos acertam.
     """
     melhor = min((p.distancia for p in insp.pares), default=None)
-    return _elegivel_auto(insp.decisao, insp.resposta, melhor, insp.via_web, limiar_auto)
+    externa = insp.via_web or insp.via_portal
+    return _elegivel_auto(insp.decisao, insp.resposta, melhor, externa, limiar_auto)
 
 
 async def _query_de_busca(
@@ -308,8 +337,9 @@ async def inspecionar(
     rag_service: RagService,
     claude: ClaudeClient,
     busca_web: BuscaWebClient | None = None,
+    portal_service: PortalService | None = None,
 ) -> Inspecao:
-    """MIOLO do pipeline: reformular query → RAG → Claude → decisão → (busca web).
+    """MIOLO do pipeline: reformular query → RAG → Claude → decisão → (Portal → busca web).
 
     SEM efeitos colaterais. NÃO recebe Freshdesk nem WhatsApp — por construção, não há como
     escrever nota nem enviar mensagem por este caminho. É a MESMA lógica que o `processar()`
@@ -337,7 +367,27 @@ async def inspecionar(
         distancia_maxima=settings.distancia_maxima_confiavel,
     )
 
-    # ÚLTIMO RECURSO: só se escalou por FALTA DE CONTEXTO e a flag está ligada.
+    # PORTAL DO CLIENTE TOTVS (ADR-026): fonte do PARCEIRO (chamados resolvidos com a TOTVS),
+    # tentada ANTES da web pública — mais autoritativa. Só no ESCALAR, atrás da flag. Busca por
+    # palavra-chave usando a `query` (intenção reformulada).
+    via_portal = False
+    pares_portal: list[Similar] = []
+    if (
+        settings.portal_totvs_ativo
+        and portal_service is not None
+        and decisao is Decisao.ESCALAR
+    ):
+        resposta, decisao, via_portal, pares_portal = await _tentar_portal(
+            problema,
+            query,
+            ticket.id,
+            resposta,
+            decisao,
+            portal_service=portal_service,
+            claude=claude,
+        )
+
+    # ÚLTIMO RECURSO: só se AINDA escalou (Portal não resolveu) e a flag da web está ligada.
     # Pedido operacional NÃO vai à web — é execução humana, não uma dúvida pesquisável.
     via_web = False
     pares_web: list[Similar] = []
@@ -370,7 +420,7 @@ async def inspecionar(
     # Recorte de auto-resposta (ADR-041) + modo sombra (ADR-042): calculado após a decisão final
     # (inclui o desfecho da web), para marcar e — se em sombra — sinalizar na nota. NÃO envia nada.
     auto_elegivel = _elegivel_auto(
-        decisao, resposta, melhor_distancia, via_web, settings.limiar_auto_resposta
+        decisao, resposta, melhor_distancia, via_web or via_portal, settings.limiar_auto_resposta
     )
     return Inspecao(
         problema=problema,
@@ -381,15 +431,20 @@ async def inspecionar(
         via_web=via_web,
         pares_web=pares_web,
         query_web=query_web,
+        via_portal=via_portal,
+        pares_portal=pares_portal,
         auto_elegivel=auto_elegivel,
         nota=_nota(
             decisao,
             resposta,
             via_web=via_web,
+            via_portal=via_portal,
             auto_elegivel=auto_elegivel,
             modo_sombra=settings.modo_sombra_auto,
         ),
-        whatsapp=_whatsapp(decisao, ticket.id, ticket.empresa, resposta, via_web=via_web),
+        whatsapp=_whatsapp(
+            decisao, ticket.id, ticket.empresa, resposta, via_web=via_web, via_portal=via_portal
+        ),
     )
 
 
@@ -428,6 +483,40 @@ async def _tentar_busca_web(
     except Exception:
         logger.exception(
             "Busca web (último recurso) falhou (ticket %s) — mantém escala.", ticket_id
+        )
+        return resposta, decisao, False, []
+
+
+async def _tentar_portal(
+    problema: str,
+    query: str,
+    ticket_id: int,
+    resposta: RespostaIA,
+    decisao: Decisao,
+    *,
+    portal_service: PortalService,
+    claude: ClaudeClient,
+) -> tuple[RespostaIA, Decisao, bool, list[Similar]]:
+    """Busca no Portal TOTVS e reconsulta o Claude com os chamados resolvidos. Best-effort.
+
+    Retorna (resposta, decisao, via_portal, pares_portal). via_portal=True só quando o Portal
+    trouxe pares e o Claude foi reconsultado (o desfecho passa a ser o dessa 2ª chamada). Fonte
+    "menos verificada" (histórico do parceiro) — revisão humana obrigatória (Fase 1). Solução do
+    Portal de alçada admin também vai à equipe, não ao cliente (ADR-031).
+    """
+    try:
+        pares = await portal_service.buscar(query)  # best-effort: nunca levanta
+        if not pares:
+            return resposta, decisao, False, []
+        resposta_p = await claude.gerar_resposta(problema, pares)
+        if resposta_p.encontrou_solucao:
+            decisao_p = Decisao.ALCADA_ADMIN if resposta_p.alcada_admin else Decisao.RESOLVIDO
+        else:
+            decisao_p = Decisao.ESCALAR
+        return resposta_p, decisao_p, True, pares
+    except Exception:
+        logger.exception(
+            "Portal TOTVS (último recurso) falhou (ticket %s) — mantém escala.", ticket_id
         )
         return resposta, decisao, False, []
 
@@ -522,6 +611,7 @@ async def processar(
     whatsapp: WhatsAppClient,
     busca_web: BuscaWebClient | None = None,
     visao: VisaoClient | None = None,
+    portal_service: PortalService | None = None,
 ) -> None:
     # 1. Idempotência — reentrega do mesmo ticket é ignorada.
     if not await idempotencia.marcar_em_processamento(ticket_id):
@@ -541,6 +631,7 @@ async def processar(
             rag_service=rag_service,
             claude=claude,
             busca_web=busca_web,
+            portal_service=portal_service,
         )
     except Exception:
         logger.exception("Falha no miolo do pipeline (ticket %s) — fallback.", ticket_id)

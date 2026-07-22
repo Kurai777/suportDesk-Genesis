@@ -1088,3 +1088,110 @@ async def test_reformulacao_que_falha_cai_no_texto_limpo_e_nao_derruba_o_chamado
     assert rag.queries == [insp.problema]  # best-effort: comportamento pré-ADR-024
     assert insp.query == insp.problema
     assert insp.decisao is Decisao.RESOLVIDO  # o chamado seguiu normalmente
+
+
+# --- Portal do Cliente TOTVS no ESCALAR (ADR-026) --------------------------
+
+
+class FakePortalService:
+    def __init__(self, pares=None):
+        self._pares = pares or []
+        self.buscas = []
+
+    async def buscar(self, keywords):
+        self.buscas.append(keywords)
+        return self._pares
+
+
+class FakeClaudePortal:
+    """Resolve quando os pares vêm do Portal; senão devolve a resposta local."""
+
+    def __init__(self, local, portal):
+        self._local = local
+        self._portal = portal
+
+    async def gerar_resposta(self, problema, pares):
+        veio_portal = any(getattr(p, "fonte", None) == "portal_totvs" for p in pares)
+        return self._portal if veio_portal else self._local
+
+    async def reformular_query(self, problema):
+        return problema
+
+
+def _par_portal(tid=10):
+    return Similar(tid, "erro no portal", "faça X", None, 1.0, fonte="portal_totvs",
+                   titulo=f"Portal #{tid}")
+
+
+def _portal_on(settings):
+    return settings.model_copy(update={"portal_totvs_ativo": True})
+
+
+async def test_portal_resolve_quando_local_escala(settings):
+    portal = FakePortalService(pares=[_par_portal()])
+    claude = FakeClaudePortal(
+        local=_resposta(encontrou=False, confianca="baixa"),
+        portal=_resposta(encontrou=True, confianca="alta", cliente="Faça X para resolver."),
+    )
+    insp = await inspecionar(
+        _ticket(),
+        settings=_portal_on(settings),
+        rag_service=FakeRag([]),
+        claude=claude,
+        portal_service=portal,
+    )
+    assert portal.buscas  # o Portal foi consultado
+    assert insp.via_portal is True
+    assert insp.decisao is Decisao.RESOLVIDO
+    assert "Portal do Cliente TOTVS" in insp.nota
+    assert "via Portal TOTVS" in insp.whatsapp
+    assert insp.pares_portal and insp.pares_portal[0].fonte == "portal_totvs"
+
+
+async def test_portal_vazio_mantem_escala(settings):
+    portal = FakePortalService(pares=[])
+    claude = FakeClaudePortal(
+        local=_resposta(encontrou=False, confianca="baixa"),
+        portal=_resposta(encontrou=True, confianca="alta"),
+    )
+    insp = await inspecionar(
+        _ticket(),
+        settings=_portal_on(settings),
+        rag_service=FakeRag([]),
+        claude=claude,
+        portal_service=portal,
+    )
+    assert portal.buscas  # tentou
+    assert insp.via_portal is False
+    assert insp.decisao is Decisao.ESCALAR
+
+
+async def test_portal_flag_off_nao_consulta(settings):
+    portal = FakePortalService(pares=[_par_portal()])
+    insp = await inspecionar(
+        _ticket(),
+        settings=settings,  # portal_totvs_ativo default False
+        rag_service=FakeRag([]),
+        claude=FakeClaude(resposta=_resposta(encontrou=False, confianca="baixa")),
+        portal_service=portal,
+    )
+    assert portal.buscas == []  # flag off → nem consultou o Portal
+    assert insp.via_portal is False
+    assert insp.decisao is Decisao.ESCALAR
+
+
+async def test_portal_nao_consulta_quando_local_resolve(settings):
+    portal = FakePortalService(pares=[_par_portal()])
+    claude = FakeClaudePortal(
+        local=_resposta(encontrou=True, confianca="alta"),  # local já resolve
+        portal=_resposta(encontrou=True, confianca="alta"),
+    )
+    insp = await inspecionar(
+        _ticket(),
+        settings=_portal_on(settings),
+        rag_service=FakeRag([Similar(1, "p", "s", "Empresa A", 0.1)]),  # match perto → RESOLVIDO
+        claude=claude,
+        portal_service=portal,
+    )
+    assert portal.buscas == []  # resolveu local → nem foi ao Portal
+    assert insp.decisao is Decisao.RESOLVIDO and insp.via_portal is False

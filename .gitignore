@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# Sessão do Portal (contém o token/JWT — ADR-026)
+.portal_sessao.json
 
 # Python
 __pycache__/

@@ -105,6 +105,9 @@ class Settings(BaseSettings):
     # 2FA: código expira (~30s). Se vier inválido/expirado, avisa no grupo e PEDE outro, até N.
     portal_login_max_2fa: int = 4
     portal_login_2fa_timeout_s: float = 90.0  # espera por tentativa
+    # Armazém da sessão (token) do Portal: o refresher grava, o servidor lê. Contém segredo —
+    # gitignored. Desacopla o browser (login) da busca (ADR-026).
+    portal_sessao_arquivo: str = ".portal_sessao.json"
 
     # --- Regra de negócio ---
     confianca_minima: str = "alta"
