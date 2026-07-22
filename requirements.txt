@@ -32,3 +32,9 @@ trafilatura==2.1.0
 # lxml: parse/limpeza do HTML dos artigos Zendesk (já vem via trafilatura; fixado por
 # ser importado diretamente em scripts/coletar_central.py).
 lxml==6.1.1
+
+# --- Login do Portal do Cliente TOTVS (ADR-026) ---
+# playwright: dirige o browser no PortalLoginProvider (login 2FA). Import TARDIO em
+# app/portal_login.py — só carrega quando o login é acionado. Deploy exige também o
+# binário do browser: `python -m playwright install chromium`.
+playwright==1.61.0

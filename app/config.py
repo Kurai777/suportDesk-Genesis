@@ -90,6 +90,19 @@ class Settings(BaseSettings):
     # confiança). Usado no relay de OTP (ADR-026).
     portal_otp_autorizados: list[str] = Field(default_factory=list)
 
+    # --- Login do Portal (provedor de sessão 2FA, ADR-026) ---
+    # Credencial do Portal (ALTO VALOR — conta de parceiro). NUNCA no código/git/chat; só aqui,
+    # do .env (cofre em produção). Usada pelo PortalLoginProvider (browser) na re-auth ocasional.
+    portal_login_usuario: str = ""
+    portal_login_senha: str = ""
+    # URL que dispara o get-tickets (e o login SAML, se deslogado).
+    portal_login_url: str = (
+        "https://suporte.totvs.com/portal/p/10098/customer-portal-dashboard/tickets"
+    )
+    # Perfil Chrome persistido (lembra o dispositivo → 2FA raro). Vazio = padrão no home.
+    portal_login_profile_dir: str = ""
+    portal_login_headless: bool = True  # false = janela visível (útil no primeiro teste)
+
     # --- Regra de negócio ---
     confianca_minima: str = "alta"
     # Guardrail de distância (ADR-030): só RESOLVE se o melhor par recuperado estiver a uma
