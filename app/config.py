@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     # integração não é acionada (padrão seguro). Ver ADR-026.
     portal_totvs_base_url: str = "https://ti-services.totvs.com.br/customer-portal-backend"
     portal_totvs_ativo: bool = False
+    # Números autorizados a responder o OTP (2FA) no grupo, em JSON (ex.: ["5511999998888"]).
+    # Vazio = qualquer membro do grupo pode fornecer o código (o grupo já é a fronteira de
+    # confiança). Usado no relay de OTP (ADR-026).
+    portal_otp_autorizados: list[str] = Field(default_factory=list)
 
     # --- Regra de negócio ---
     confianca_minima: str = "alta"
