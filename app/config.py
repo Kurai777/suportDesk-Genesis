@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     # Perfil Chrome persistido (lembra o dispositivo → 2FA raro). Vazio = padrão no home.
     portal_login_profile_dir: str = ""
     portal_login_headless: bool = True  # false = janela visível (útil no primeiro teste)
+    # 2FA: código expira (~30s). Se vier inválido/expirado, avisa no grupo e PEDE outro, até N.
+    portal_login_max_2fa: int = 4
+    portal_login_2fa_timeout_s: float = 90.0  # espera por tentativa
 
     # --- Regra de negócio ---
     confianca_minima: str = "alta"

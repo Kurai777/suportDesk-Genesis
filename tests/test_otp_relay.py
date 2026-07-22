@@ -124,3 +124,19 @@ async def test_sem_grupo_configurado_nao_pede(settings):
     relay = RelayOtp(wa, inbox, _cfg(settings, whatsapp_grupo_destino=""))
     assert await relay.solicitar(timeout_s=0.05, intervalo_s=0.01) is None
     assert wa.enviados == []  # nem tentou postar
+
+
+async def test_avisar_posta_no_grupo(settings):
+    inbox = InboxWhatsApp()
+    wa = FakeWhatsAppReply(inbox, resposta=None)
+    relay = RelayOtp(wa, inbox, _cfg(settings))
+    await relay.avisar("✅ Código aceito")
+    assert wa.enviados == [(_GRUPO, "✅ Código aceito")]
+
+
+async def test_avisar_sem_grupo_nao_posta(settings):
+    inbox = InboxWhatsApp()
+    wa = FakeWhatsAppReply(inbox, resposta=None)
+    relay = RelayOtp(wa, inbox, _cfg(settings, whatsapp_grupo_destino=""))
+    await relay.avisar("qualquer")
+    assert wa.enviados == []

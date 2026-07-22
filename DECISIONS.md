@@ -836,13 +836,16 @@ sessão** — e é limpa. Isso **derruba o scraping de DOM**: a integração vir
        `#mfa-token` (placeholder `000-000`, `one-time-code`) + "Entrar".
      - **Perfil persistido lembra o dispositivo → 2FA raro** (fallback ocasional); entre logins é
        tudo httpx. Requer `playwright install chromium` (binário no servidor).
-     - **Validação ao vivo (2026-07-22):** o login FUNCIONOU nas duas rodadas (creds → chegou no
-       2FA → o bot postou o pedido no grupo; o Gustavo respondeu `893-513` na 1ª). As rodadas
-       falharam só por **timing humano** (o Gustavo respondeu tarde / estava ocupado), não por bug.
-       Falta UMA rodada com resposta rápida pra capturar o JWT ponta a ponta.
-     - **⚠️ Restrição do TOTP:** o código do app expira (~30s). O round-trip (bot pede → humano lê o
-       app → responde → relay pega → bot submete) precisa caber nessa janela. Mitiga: o perfil
-       persistido torna o 2FA RARO (só re-auth), e vale prever RETRY se o código vencer.
+     - ✅ **VALIDADO AO VIVO, LOOP FECHADO (2026-07-22):** rodada completa com Evolution + grupo
+       reais: login (creds) → 2FA → bot pediu no grupo → **`SessaoPortal` OBTIDA**
+       (`user_id=374391156891`, `customer=99034`, JWT de ~37 KB capturado do `get-tickets`). As 2
+       primeiras tentativas deram timeout (humano lento) e o **RETRY completou na 3ª** — provando
+       o mecanismo.
+     - **Retry + feedback (construído):** o código 2FA expira (~30s), então cada tentativa pode
+       falhar por timing. O `PortalLoginProvider._resolver_2fa` PEDE o código, submete e, se o
+       `#mfa-token` não sumir (inválido/expirado), **avisa no grupo** ("❌ código inválido, manda
+       outro") e re-tenta até `PORTAL_LOGIN_MAX_2FA`; no sucesso avisa "✅ login realizado". O
+       `RelayOtp.avisar()` posta o feedback. Mitiga o TOTP; e o perfil persistido torna o 2FA RARO.
   2. **Ligar no fluxo** — busca ao vivo no ESCALAR (latência tolerável, decisão do Bruno) e/ou
      `ingest_portal.py` (varrer + ingerir no RAG, `fonte='portal_totvs'`, idempotência DB-native).
   3. **View certa do pool cross-cliente** (o template capturado era "Meus Tickets") + **medir a

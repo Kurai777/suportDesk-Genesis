@@ -115,16 +115,55 @@ class PortalLoginProvider:
             if self._relay is None:
                 logger.error("2FA exigido, mas sem RelayOtp configurado.")
                 return
-            logger.info("PortalLoginProvider: 2FA — solicitando o código no grupo.")
-            otp = await self._relay.solicitar(motivo="acesso ao Portal TOTVS")
-            if not otp:
-                logger.error("2FA: o relay não trouxe o código (timeout).")
+            if not await self._resolver_2fa(pg):
+                logger.error(
+                    "2FA: não completou após %d tentativa(s).", self._s.portal_login_max_2fa
+                )
                 return
-            await pg.type("#mfa-token", otp, delay=80)
-            await self._submeter(pg, "#mfa-token")
 
         with contextlib.suppress(Exception):
             await pg.wait_for_load_state("networkidle", timeout=60000)
+
+    async def _resolver_2fa(self, pg: Any) -> bool:
+        """Pede o código no grupo, submete e RE-TENTA se inválido/expirado (feedback no grupo).
+
+        O código 2FA expira (~30s), então uma tentativa pode falhar por timing — aqui avisamos
+        o responsável no grupo ("inválido, manda outro") e pedimos de novo, até `max_2fa`.
+        """
+        relay = self._relay
+        for tentativa in range(1, self._s.portal_login_max_2fa + 1):
+            logger.info("2FA: tentativa %d — pedindo o código no grupo.", tentativa)
+            otp = await relay.solicitar(
+                motivo="acesso ao Portal TOTVS",
+                timeout_s=self._s.portal_login_2fa_timeout_s,
+            )
+            if not otp:
+                logger.info("2FA: sem resposta a tempo (tentativa %d).", tentativa)
+                with contextlib.suppress(Exception):
+                    await relay.avisar("⏳ Não recebi o código a tempo. Pedindo de novo…")
+                continue
+
+            with contextlib.suppress(Exception):
+                await pg.fill("#mfa-token", "")  # limpa um código anterior, se houver
+            await pg.type("#mfa-token", otp, delay=80)
+            await self._submeter(pg, "#mfa-token")
+
+            # sucesso = a tela do 2FA some (navegou para o Portal)
+            try:
+                await pg.wait_for_selector("#mfa-token", state="detached", timeout=15000)
+            except Exception:
+                logger.info("2FA: código inválido/expirado (tentativa %d).", tentativa)
+                with contextlib.suppress(Exception):
+                    await relay.avisar(
+                        "❌ Código inválido ou expirado. Me manda um novo, por favor."
+                    )
+                continue
+
+            logger.info("2FA: aceito na tentativa %d.", tentativa)
+            with contextlib.suppress(Exception):
+                await relay.avisar("✅ Código aceito — login realizado com sucesso!")
+            return True
+        return False
 
     @staticmethod
     async def _submeter(pg: Any, campo: str) -> None:

@@ -69,6 +69,11 @@ class RelayOtp:
             return True  # sem lista: o próprio grupo é a fronteira de confiança
         return _numero_do_jid(msg.remetente_jid) in self._autorizados
 
+    async def avisar(self, texto: str) -> None:
+        """Posta uma mensagem avulsa no grupo (feedback: 2FA aceito / inválido / expirado)."""
+        if self._grupo:
+            await self._whatsapp.enviar(self._grupo, texto)
+
     async def solicitar(
         self,
         *,
