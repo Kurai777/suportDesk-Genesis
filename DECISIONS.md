@@ -825,19 +825,24 @@ sessão** — e é limpa. Isso **derruba o scraping de DOM**: a integração vir
        (`extrair_otp`, 4–8 dígitos). Snapshot de ids ignora histórico; timeout devolve None.
      - Teste ao vivo (Evolution real, grupo real): pedido postado → resposta no grupo →
        **OTP `444765` capturado**. Envio e recepção de GRUPO provados ponta a ponta.
-     FALTA: o **`PortalLoginProvider`** (browser) que dispara `RelayOtp` no 2FA, injeta o código e
-     captura o **JWT** → `SessaoPortal`. **Mapa do login já levantado (spike CDP, 2026-07-22):**
-     - **Login** (SSO SAML `totvs.fluigidentity.com/ui/login-saml`): `input#username` (email) +
-       `input#password` + botão "Entrar".
+     ✅ **`PortalLoginProvider` CONSTRUÍDO (app/portal_login.py, 2026-07-22):** Playwright + perfil
+     persistido; preenche credencial (do `.env`) → se aparecer `#mfa-token`, `RelayOtp.solicitar()`
+     (o responsável responde no grupo) → preenche → submete → captura o JWT/userId/customerCode do
+     corpo do `get-tickets` → `SessaoPortal`. **Mapa do login (spike CDP):**
+     - **Login** (SSO SAML `totvs.fluigidentity.com/ui/login-saml`): `#username` + `#password`; o
+       submit é robusto (clica o texto "Entrar", fallback Enter — o nome ACESSÍVEL do botão não bate
+       com o texto visível).
      - **2FA** (só em dispositivo NÃO-confiável): `totvs.fluigidentity.com/ui/mfa/login` →
-       `input#mfa-token` (placeholder `000-000`, `autocomplete=one-time-code`) + botão "Entrar".
-     - **Dispositivo confiável / perfil persistido:** o 2FA é LEMBRADO → login vira só credencial
-       (o 2FA+relay é fallback ocasional). Após o SAML, o Portal emite o JWT (capturado do corpo do
-       `get-tickets`, como na receita da API).
-     - **Provider (a construir):** Playwright + perfil persistido; preenche credencial → se aparecer
-       `#mfa-token`, `RelayOtp.solicitar()` (Gustavo responde no grupo) → preenche → "Entrar" →
-       captura o JWT/userId/customerCode → `SessaoPortal`. Credencial em `.env` (nunca no chat/git);
-       requer `playwright install chromium` (binário do browser no servidor).
+       `#mfa-token` (placeholder `000-000`, `one-time-code`) + "Entrar".
+     - **Perfil persistido lembra o dispositivo → 2FA raro** (fallback ocasional); entre logins é
+       tudo httpx. Requer `playwright install chromium` (binário no servidor).
+     - **Validação ao vivo (2026-07-22):** o login FUNCIONOU nas duas rodadas (creds → chegou no
+       2FA → o bot postou o pedido no grupo; o Gustavo respondeu `893-513` na 1ª). As rodadas
+       falharam só por **timing humano** (o Gustavo respondeu tarde / estava ocupado), não por bug.
+       Falta UMA rodada com resposta rápida pra capturar o JWT ponta a ponta.
+     - **⚠️ Restrição do TOTP:** o código do app expira (~30s). O round-trip (bot pede → humano lê o
+       app → responde → relay pega → bot submete) precisa caber nessa janela. Mitiga: o perfil
+       persistido torna o 2FA RARO (só re-auth), e vale prever RETRY se o código vencer.
   2. **Ligar no fluxo** — busca ao vivo no ESCALAR (latência tolerável, decisão do Bruno) e/ou
      `ingest_portal.py` (varrer + ingerir no RAG, `fonte='portal_totvs'`, idempotência DB-native).
   3. **View certa do pool cross-cliente** (o template capturado era "Meus Tickets") + **medir a

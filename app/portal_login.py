@@ -101,12 +101,12 @@ class PortalLoginProvider:
         logger.info("PortalLoginProvider: preenchendo credenciais.")
         await pg.fill("#username", self._s.portal_login_usuario)
         await pg.fill("#password", self._s.portal_login_senha)
-        await pg.get_by_role("button", name="Entrar", exact=True).first.click()
+        await self._submeter(pg, "#password")
 
         # espera o 2FA aparecer OU o Portal carregar (dispositivo confiável pula o 2FA)
         tem_mfa = False
         try:
-            await pg.wait_for_selector("#mfa-token", timeout=12000)
+            await pg.wait_for_selector("#mfa-token", timeout=15000)
             tem_mfa = True
         except Exception:
             tem_mfa = False
@@ -121,7 +121,20 @@ class PortalLoginProvider:
                 logger.error("2FA: o relay não trouxe o código (timeout).")
                 return
             await pg.type("#mfa-token", otp, delay=80)
-            await pg.get_by_role("button", name="Entrar", exact=True).first.click()
+            await self._submeter(pg, "#mfa-token")
 
         with contextlib.suppress(Exception):
             await pg.wait_for_load_state("networkidle", timeout=60000)
+
+    @staticmethod
+    async def _submeter(pg: Any, campo: str) -> None:
+        """Submete o form: clica o botão de texto "Entrar" (exato); se falhar, dá Enter no campo.
+
+        Robusto contra o nome acessível do botão não bater exatamente (o texto visível é "Entrar",
+        mas o role/name pode diferir).
+        """
+        try:
+            await pg.get_by_text("Entrar", exact=True).first.click(timeout=6000)
+        except Exception:
+            with contextlib.suppress(Exception):
+                await pg.locator(campo).press("Enter")
