@@ -815,12 +815,18 @@ sessão** — e é limpa. Isso **derruba o scraping de DOM**: a integração vir
   assinatura → inutilizável) + um e-mail foram removidos do disco; artefatos com dado de terceiros
   apagados. O `token` é segredo — nunca logar.
 - **Pendente para produção:**
-  1. **Provedor de token** — login 2FA humano + **relay do OTP pelo grupo de WhatsApp**. ✅ A
-     metade RECEPTORA já existe: `POST /webhook/whatsapp` recebe o evento `messages.upsert` da
-     Evolution (auth por segredo em header/`?secret=`), normaliza (`parse_evento_evolution` →
-     `MensagemRecebida`) e guarda no `InboxWhatsApp` (buffer em memória) — o log/inbox permite
-     testar o fluxo ponta-a-ponta. FALTA: o login 2FA (browser) que PEDE o OTP no grupo e o
-     consumidor que lê o OTP do inbox e minta/renova o JWT.
+  1. **Provedor de token** — login 2FA humano + **relay do OTP pelo grupo de WhatsApp**.
+     ✅ **Relay construído e VALIDADO AO VIVO (2026-07-22):**
+     - RECEPÇÃO: `POST /webhook/whatsapp` recebe `messages.upsert` da Evolution (auth por segredo
+       em header/`?secret=`), `parse_evento_evolution` → `MensagemRecebida`, guarda no
+       `InboxWhatsApp`; `GET /webhook/whatsapp/recentes` inspeciona.
+     - RELAY: `app/otp_relay.py` `RelayOtp.solicitar()` posta o pedido no grupo (WhatsAppClient),
+       observa o inbox por uma resposta NO GRUPO de remetente autorizado e extrai o código
+       (`extrair_otp`, 4–8 dígitos). Snapshot de ids ignora histórico; timeout devolve None.
+     - Teste ao vivo (Evolution real, grupo real): pedido postado → resposta no grupo →
+       **OTP `444765` capturado**. Envio e recepção de GRUPO provados ponta a ponta.
+     FALTA: o **login 2FA via browser** (Playwright) que dispara `RelayOtp.solicitar()` no ponto
+     do 2FA, injeta o código e captura o **JWT** → vira a `SessaoPortal` do `PortalTotvsClient`.
   2. **Ligar no fluxo** — busca ao vivo no ESCALAR (latência tolerável, decisão do Bruno) e/ou
      `ingest_portal.py` (varrer + ingerir no RAG, `fonte='portal_totvs'`, idempotência DB-native).
   3. **View certa do pool cross-cliente** (o template capturado era "Meus Tickets") + **medir a
