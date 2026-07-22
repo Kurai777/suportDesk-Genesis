@@ -12,6 +12,8 @@ Uso:
     # habilite a interface (uma vez): no .env, INTERFACE_TESTE_ATIVA=true
     python run_local.py                  # http://127.0.0.1:8000  → abra /teste
     #   PORT=8077 python run_local.py     # outra porta
+    #   HOST=0.0.0.0 python run_local.py  # aceita conexões externas (ex.: a Evolution em
+    #                                     # docker chega via http://host.docker.internal:PORT)
 """
 
 from __future__ import annotations
@@ -38,4 +40,7 @@ if sys.platform == "win32":
 
 if __name__ == "__main__":
     porta = int(os.environ.get("PORT", "8000"))
-    uvicorn.run("app.main:app", host="127.0.0.1", port=porta, loop="asyncio")
+    # 127.0.0.1 por padrão (seguro: só loopback). HOST=0.0.0.0 quando um container (Evolution)
+    # precisa alcançar o webhook via host.docker.internal — ver TESTE_WHATSAPP.md.
+    host = os.environ.get("HOST", "127.0.0.1")
+    uvicorn.run("app.main:app", host=host, port=porta, loop="asyncio")
