@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # chamado. Desligue (false) para pular a leitura de imagens.
     leitura_imagens_ativa: bool = True
 
+    # --- Portal do Cliente TOTVS (API interna, ADR-026) ---
+    # Cliente da API JSON privada do Portal (get-tickets / get-comments). A autenticação é
+    # um JWT de sessão (login 2FA humano) injetado em runtime — NÃO fica aqui. false = a
+    # integração não é acionada (padrão seguro). Ver ADR-026.
+    portal_totvs_base_url: str = "https://ti-services.totvs.com.br/customer-portal-backend"
+    portal_totvs_ativo: bool = False
+
     # --- Regra de negócio ---
     confianca_minima: str = "alta"
     # Guardrail de distância (ADR-030): só RESOLVE se o melhor par recuperado estiver a uma
