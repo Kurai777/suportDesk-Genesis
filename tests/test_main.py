@@ -139,3 +139,26 @@ def test_whatsapp_webhook_ignora_evento_nao_mensagem(settings, monkeypatch):
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "ignorado"
+
+
+def test_whatsapp_recentes_lista_inbox(settings, monkeypatch):
+    monkeypatch.setattr(main, "get_settings", lambda: _settings_wa(settings))
+    with TestClient(main.app) as client:
+        client.post(
+            "/webhook/whatsapp",
+            json=_evento_wa("token 555111"),
+            headers={"X-Webhook-Secret": "seg-wa"},
+        )
+        resp = client.get("/webhook/whatsapp/recentes?secret=seg-wa")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["recentes"][0]["texto"] == "token 555111"
+        assert body["recentes"][0]["remetente_nome"] == "Responsavel"
+
+
+def test_whatsapp_recentes_exige_segredo(settings, monkeypatch):
+    monkeypatch.setattr(main, "get_settings", lambda: _settings_wa(settings))
+    with TestClient(main.app) as client:
+        resp = client.get("/webhook/whatsapp/recentes?secret=errado")
+        assert resp.status_code == 401

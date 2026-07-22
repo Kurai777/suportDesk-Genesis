@@ -15,6 +15,7 @@ import hmac
 import logging
 import sys
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
 
 import httpx
@@ -125,6 +126,21 @@ async def webhook_whatsapp(
         msg.texto[:200],
     )
     return {"status": "recebido"}
+
+
+@app.get("/webhook/whatsapp/recentes")
+async def whatsapp_recentes(
+    request: Request,
+    x_webhook_secret: str = Header(default=""),
+    secret: str = Query(default=""),
+    n: int = 10,
+) -> dict:
+    """Inspeção das últimas mensagens recebidas (mesmo segredo do webhook). Ferramenta de teste."""
+    settings: Settings = request.app.state.settings
+    if not _secret_valido(x_webhook_secret or secret, settings.whatsapp_webhook_secret):
+        raise HTTPException(status_code=401, detail="segredo inválido")
+    msgs = request.app.state.whatsapp_inbox.recentes(n)
+    return {"total": len(msgs), "recentes": [asdict(m) for m in msgs]}
 
 
 async def _rodar_pipeline(app: FastAPI, ticket_id: int) -> None:
