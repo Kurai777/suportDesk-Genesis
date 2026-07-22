@@ -784,6 +784,44 @@ Sai de "proposta abstrata" para **abordagem decidida** (ainda condicionada aos p
 **Dimensionamento pendente:** quantos chamados resolvidos há na conta certa (centenas? milhares?) —
 decide se o dump manual via Cowork basta ou se a automação (passo 4) entra logo.
 
+### ATUALIZAÇÃO 2026-07-22 (parte 2) — API interna mapeada + `PortalTotvsClient` construído
+
+Spike ao vivo (Playwright conectado por **CDP ao Chrome logado** — reusa a sessão, **sem tocar
+credencial**) mapeou a API interna da SPA. **Não há API pública, mas a interna é chamável com a
+sessão** — e é limpa. Isso **derruba o scraping de DOM**: a integração vira chamadas JSON.
+
+- **Endpoints** (POST, base `ti-services.totvs.com.br/customer-portal-backend`):
+  - `help-center/tickets/get-tickets` — lista/busca. Corpo: `keywords`, `catalogV3ProductTags`/
+    `ModuleTags`/`RoutineGrouperTags`, `organizationsIds`, `status`, `userId`, `pagination{page}`,
+    `sortBy`/`sortOrder`, `token`, `customerCode`. Resposta: `tickets[]` (subject, description,
+    `catalogV3{product,module}`, `organization{name}`, ticketId, status, datas) + `pagination{count,hasNext}`.
+  - `help-center/tickets/get-comments` — conversa. Corpo: `ticketId`, `pagination`, `token`,
+    `customerCode`. Resposta: `comments[]` (author, body **em HTML**, `isEndUser`, `isPrivate`).
+    **A SOLUÇÃO = comentários do agente** (`isEndUser=false` e `isPrivate=false`).
+- **Autenticação = JWT de sessão NO CORPO do POST** (não header/cookie). O login é **2FA por app**
+  → **login puro-HTTP está descartado**: o token vem de uma sessão já logada (o 2FA é humano).
+- **Prova ponta-a-ponta:** com o token da sessão, `token → get-tickets(busca) → get-comments` montou
+  o par problema+solução real (ex.: #7821159 COLEGIO ARBOS → "atualizar os Binários / upgrade de
+  release"). HTTP puro, sem navegador no caminho crítico.
+- **Construído (este marco):** `app/portal_totvs.py` — `PortalTotvsClient` (httpx fino:
+  `buscar_tickets` / `comentarios` / `solucao`; `SessaoPortal(token, user_id, customer_code)`;
+  modelos `TicketPortal`/`ComentarioPortal`; HTML limpo com lxml; retry tenacity em rede/429/5xx).
+  Config `PORTAL_TOTVS_ATIVO` (default false) + `PORTAL_TOTVS_BASE_URL`; o token NUNCA vai ao `.env`
+  (injetado em runtime). 8 testes `respx` (corpo/parse/solução/HTML/retry), token fake. **NÃO ligado
+  ao pipeline** ainda → zero mudança de comportamento. Isolamento cross-cliente: `organizacao` só
+  como metadado, fora do texto embedado; regra de ouro mantida (fonte MENOS verificada, revisão
+  humana obrigatória).
+- **Segurança dos spikes:** o JWT foi tratado em memória; um vazamento parcial (truncado antes da
+  assinatura → inutilizável) + um e-mail foram removidos do disco; artefatos com dado de terceiros
+  apagados. O `token` é segredo — nunca logar.
+- **Pendente para produção:**
+  1. **Provedor de token** — login 2FA humano + **relay do OTP pelo grupo de WhatsApp** (exige
+     **WhatsApp de ENTRADA**, hoje inexistente) para mintar/renovar o JWT e mantê-lo quente.
+  2. **Ligar no fluxo** — busca ao vivo no ESCALAR (latência tolerável, decisão do Bruno) e/ou
+     `ingest_portal.py` (varrer + ingerir no RAG, `fonte='portal_totvs'`, idempotência DB-native).
+  3. **View certa do pool cross-cliente** (o template capturado era "Meus Tickets") + **medir a
+     validade do token** (cadência de re-auth).
+
 ## ADR-027 — Busca web LIGADA + visível na interface de teste
 
 - **Contexto:** a busca web (ADR-015) já funcionava, mas vinha DESLIGADA por padrão
