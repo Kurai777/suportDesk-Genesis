@@ -715,6 +715,75 @@ Um módulo só é considerado PRONTO quando:
   base local resolve a grande maioria, o ROI desta fase — frente aos riscos (a)/(b) — pode não se
   justificar. A medição decide; hoje não há número para sustentar o esforço.
 
+### ATUALIZAÇÃO 2026-07-22 — viabilidade validada + abordagem definida (ingerir primeiro)
+
+Validação ao vivo via **Claude no Chrome (Cowork)** no `suporte.totvs.com/portal` mudou o quadro.
+Sai de "proposta abstrata" para **abordagem decidida** (ainda condicionada aos pré-requisitos abaixo).
+
+- **Achado 1 — o "Consultar Tickets" é um BAÚ, não um beco:** a conta de parceiro
+  (ex.: `TOTVS S.A – 99034`) enxerga histórico **cross-cliente** — Corteva, Brennand, União
+  Brasileira de Educação, Drogaria Araújo… — com chamados **Protheus resolvidos de 2011 a 2025**
+  (SPED F800, TOTVS RH, integrações, requisição de transferência…). Ordenar por "mais antigos/
+  recentes" já lista tudo; há **busca por palavra-chave**. É exatamente o par problema→solução que
+  o RAG quer. (A 1ª tela vista estava zerada porque era outra conta — apontar para a conta certa.)
+- **Achado 2 — sem barreira aparente na navegação manual.** Ressalva honesta: **um acesso manual
+  bem-sucedido ≠ automação headless 24/7 robusta**. Bot-detection/rate-limit costumam morder só em
+  escala/headless. Não tratar "passou no Cowork" como garantia de produção.
+- **Nota de dado cross-cliente:** são tickets de MÚLTIPLOS clientes (acesso legítimo do parceiro). A
+  proteção já existe na arquitetura: `RespostaIA` **não** carrega `empresa` e a regra de ouro impede
+  "pegar a empresa de um vizinho recuperado" — reduz o risco de vazar dado de um cliente na resposta
+  de outro. Mantido; reforçar na ingestão (guardar `empresa` do ticket-origem só como metadado, não
+  no texto embedado).
+
+**Decisão de FORMA (ingerir primeiro, navegar ao vivo por exceção):**
+
+1. **Primário — sync em lote → RAG:** varrer o "Consultar Tickets" periodicamente e **ingerir** cada
+   par problema→solução como `fonte='portal_totvs'` (irmão de `ingest_docs`). O atendimento responde
+   pelo RAG, **sem browser no caminho crítico**. Sessão só precisa ficar "quente" na janela do sync
+   (→ relay de token raro).
+2. **Exceção — busca ao vivo no ESCALAR:** só quando RAG + web pública falharem, buscar no portal por
+   palavra-chave (a query reformulada da ADR-024). Custo: exige sessão quente por mais tempo.
+3. **Ciclo de aprendizado (inalterado):** resultado ao vivo confirmado pelo cliente → ingere no RAG.
+   Com o tempo, o item 1 cobre quase tudo e o item 2 fica raro.
+
+**Autenticação (revisada, decidida com o Bruno):**
+
+- **O agente detém as credenciais** e navega com um **perfil Chrome persistido** (`user_data_dir`) —
+  numa **VM na nuvem logada uma vez e mantida quente**, ou num **agente local**. "Não loga a cada
+  run" = reusa a sessão persistida; quando ela expira, refaz o login.
+- **2FA por relay no grupo de WhatsApp:** se o portal pedir token, o agente **publica no grupo** (o
+  canal que já usa para notificar) pedindo o token; o responsável **responde no grupo com o token**;
+  o agente lê e completa o login. É human-in-the-loop para o re-login **ocasional** — não por request.
+  - **Pré-requisito técnico novo:** hoje `whatsapp.py` só **ENVIA**. Ler a resposta com o token exige
+    **WhatsApp de ENTRADA** — webhook de mensagem recebida da Evolution API (+ parsing do token,
+    janela de expiração curta, só aceitar do remetente autorizado). Peça nova a construir.
+  - **Custódia:** a credencial PERSISTENTE (login/senha ou cookie de sessão) é ativo de alto valor →
+    cofre gerenciado, não `.env` de app. O **token 2FA** é OTP curto e descartável → risco baixo
+    trafegar no grupo.
+
+**Reavaliação dos bloqueantes da versão original:**
+
+- **(a) Credencial:** endereçado pela decisão de custódia (cofre) + relay de token. Não é mais aberto.
+- **(b) ToS:** **rebaixado** de bloqueante duro. É a **própria conta lendo tickets a que já tem
+  acesso** — bem mais defensável que scraping de terceiros. Ainda vale conferir cláusula de acesso
+  automatizado com a TOTVS, mas não trava o MVP.
+- **(c) Regra de ouro anti-alucinação:** **permanece obrigatória** — fonte oficial reduz, não elimina,
+  o risco (versão diferente do Protheus, caso quase-igual). Fase 1 copiloto (revisão humana) mantida.
+
+**MVP (sem infra nova) e evolução:**
+
+1. **Dump via Cowork** (na conta certa) do "Consultar Tickets" resolvido → texto/JSON (assunto,
+   descrição, solução, produto/linha, empresa-origem como metadado).
+2. **`scripts/ingest_portal.py`** (irmão de `ingest_docs`): embeda os pares no RAG com
+   `fonte='portal_totvs'`, idempotência DB-native (ADR-016), mesmo pipeline de chunk/marcadores.
+3. **Medir** o ganho de cobertura (quantos ESCALAR passam a resolver) — como fizemos na ADR-021.
+4. **Depois**, se o volume justificar, automatizar a varredura: `PortalTotvsClient` com **Playwright**
+   + perfil persistido na nuvem + relay de token; sync semanal. Determinístico (seletores do fluxo
+   login→filtrar→abrir→extrair) — **não** computer-use agêntico por chamado (caro/frágil/lento p/ 24/7).
+
+**Dimensionamento pendente:** quantos chamados resolvidos há na conta certa (centenas? milhares?) —
+decide se o dump manual via Cowork basta ou se a automação (passo 4) entra logo.
+
 ## ADR-027 — Busca web LIGADA + visível na interface de teste
 
 - **Contexto:** a busca web (ADR-015) já funcionava, mas vinha DESLIGADA por padrão
@@ -1076,3 +1145,43 @@ Um módulo só é considerado PRONTO quando:
   distância < 0,35), atrás de um flag dedicado + kill switch, com `freshdesk.responder_publico()`.
 - **Testes:** modo sombra ligado + RESOLVIDO auto-elegível → nota avisa; desligado → não avisa; o
   fluxo/decisão não muda. **213 passando, ruff limpo.**
+
+## ADR-043 — Portabilidade da base de conhecimento (DECIDIDA — Neon, aplicada em 2026-07-10)
+
+> Rascunhada originalmente como "ADR-024" numa branch paralela (`feat/copiloto-visao-e-tom-escalar`)
+> e **renumerada para ADR-043** ao integrar na main — o número 024 já fora usado para a reformulação
+> de query. Conteúdo idêntico ao aplicado em 10/07; guia operacional completo em `INFRA.md`.
+
+- **Problema:** a base era carregada à mão entre máquinas (desktop ↔ notebook), copiando
+  `docs_totvs/` pelo Drive. Repetia a cada troca de máquina e não havia backup nenhum.
+- **Diagnóstico — o objeto sincronizado estava errado:** `docs_totvs/` (8.349 `.txt`, 42 MB) é um
+  **artefato intermediário descartável** (entrada do `ingest_docs`, regenerável pelo
+  `coletar_central`). A base de verdade é a tabela `conhecimento` (Postgres+pgvector), cujo valor
+  são os **embeddings já pagos** (8.325 vetores `voyage-3` 1024d). Levar os `.txt` obriga a
+  **re-embeddar tudo** no destino; levar o banco, não.
+- **Medido (2026-07-10):** 8.350 linhas (8.325 doc + 25 ticket); tabela+HNSW 121 MB; banco 128 MB;
+  **`pg_dump -Fc -Z9` = 37 MB** — *menor* que os `.txt` e já com os vetores. PG 16.14, pgvector 0.8.4.
+- **Opções (detalhadas em `INFRA.md`):** **A** Postgres gerenciado único (Neon/Railway/Supabase) —
+  as duas máquinas só apontam `DATABASE_URL`; **B** snapshot `pg_dump` em bucket/Drive (37 MB, é
+  também o backup, hoje inexistente); **C** `docs_totvs/` num bucket (matéria-prima, opcional).
+- **Recomendação:** **A + B** (gerenciado compartilhado, com snapshot periódico de backup).
+- **Executado (A):** projeto Neon **Genesis** (`bold-field-49175189`), `aws-us-east-1`, **PG 18.4**,
+  pgvector 0.8.1, db `neondb`. O dump (`pg_dump` 16) foi restaurado com `--no-owner --no-privileges
+  --no-comments` (o `COMMENT ON EXTENSION` exige superuser); exit 0. Conferido: 8.350 linhas, 0 sem
+  embedding, 1024 dims, índice HNSW recriado, 120 MB, e busca vetorial validada pelo mesmo adapter
+  `psycopg + pgvector` do app. **Nada re-embeddado.**
+- **Endpoint DIRETO, não o `-pooler`:** o Neon entrega por padrão a URI do pooler (pgbouncer em modo
+  transação), que quebra os *prepared statements* automáticos do psycopg3 (após ~5 execuções da
+  mesma query) — estouraria na ingestão em massa. A `DATABASE_URL` do `.env` usa o host sem
+  `-pooler`. A antiga (docker local) ficou comentada dentro do próprio `.env` como backup.
+- **Correção de segurança durante a migração:** o backup `.env.bak.local` **não** era coberto pelo
+  `.gitignore`. Adicionado `.env.*` com exceção `!.env.example`, e `*.dump`. Nenhum segredo commitado.
+- **Guardrail verificado, não presumido:** `conftest.py` lê apenas `TEST_DATABASE_URL` (default
+  `..._test` local) e nunca a `DATABASE_URL`; os `get_settings` em `test_main.py` são monkeypatch.
+  `pytest` **não alcança o Neon**: rodada completa após a migração deixou as 8.350 linhas intactas.
+- **Guardrails permanentes:** `pytest` faz `DELETE FROM conhecimento` → `TEST_DATABASE_URL` JAMAIS
+  aponta para o banco da aplicação/Neon; `DATABASE_URL` é segredo (só `.env`); `*.dump` e
+  `docs_totvs/` no `.gitignore`; `VECTOR(1024)` amarra o modelo de embedding (trocar exige recriar a
+  coluna e re-embeddar).
+- **Pendente:** separar dev × prod (bancos distintos ou branches do Neon) antes de subir a produção —
+  hoje `ingest_docs` e experimentos escrevem no mesmo banco.
